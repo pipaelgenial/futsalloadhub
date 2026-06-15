@@ -1,0 +1,57 @@
+{
+  "summary": "Phase 5 testing complete. Backend 11/11 pass: new wellness field accepted with default=7, validation rejects out-of-range; PUT /api/sessions/{id} updates fields and recomputes load; wellness drives risk (depleted→danger, fatigued→escalates safe→warning / warning→danger with reasons 'Bem-estar corporal crítico/baixo'); athlete metrics include wellness_7d + wellness_zone + avg_wellness; GET /api/analytics/weekly/{athlete_id}?weeks=8 returns 8 weeks with all 11 expected fields and 7-day span; GET /api/analytics/weekly/team/overview returns avg_wellness; /api/analytics/team summary now exposes avg_wellness. Frontend verified: Dashboard metric-avg-wellness (6.5/10), nav-weekly present and nav-monthly removed, /resumo-semanal renders all 8 testids (weekly-athlete-select default '__team__' with 9 options incl. 'Equipa (Visão Geral)', weeks-range options 4/8/12 switchable, weekly-team-label hides on athlete switch, all 3 charts render), /registar-sessao shows wellness-1..10 colored picker + Portuguese legend, form submits successfully (toast 'Sessão registada — Carga 375 UA'), AthleteDetail shows metric-wellness card (7.5/10) and Bem-Estar column, 30 edit-session buttons trigger inline edit with date/rpe/duration/sleep/wellness fields + save/cancel; saving rpe=9 persists and re-renders the session-row with new value + recomputed load.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "WeeklySummary + Dashboard ACWR chart", "issues": ["Recharts 'width(-1) height(-1)' warnings still spam the console on mount and on every weekly-athlete-select / weeks-range change (already noted in iteration_4). Functionality OK; cosmetic only."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase5_features.py",
+    "/app/test_reports/pytest/phase5_results.xml"
+  ],
+  "action_items": [
+    "Minor (carried over): fix Recharts width(-1) warnings on Dashboard + WeeklySummary by giving ResponsiveContainer a fixed minHeight or guarding render until data is ready.",
+    "Code-org (carried over from iter 3 & 4): server.py now ~1615 lines. Strongly recommend extracting routers (analytics_weekly.py, sessions.py, photos.py) — also note duplicated week/month aggregate code between /api/analytics/weekly/{athlete_id} and /api/analytics/weekly/team/overview (~40 lines).",
+    "Validation: PUT /api/sessions/{id} does not verify the session belongs to the user's team via an explicit ownership check on the session_id only — it does filter by team_id in the find, but the 404 message 'Sessão não encontrada' is correct, just confirm coverage if tenant isolation matters."
+  ],
+  "critical_code_review_comments": [
+    "Phase 5 wellness logic in compute_metrics_for_athlete recomputes avg_wellness_7d using per-session average. If multiple sessions exist on the same day, each session contributes independently to the wellness average. Consider averaging per-day first (like load is grouped via by_day) to keep wellness 'per day' rather than 'per session' — otherwise an athlete with two sessions/day skews the metric.",
+    "Risk escalation rules: 'fatigued' (3-4) escalates safe→warning and warning→danger, but does not interact with high-risk ACWR (already danger). The append order means the wellness reason can come after others. Consider sorting risk_reasons by severity so the most critical reason renders first in UI tooltips.",
+    "Duplicate weekly aggregation logic in /api/analytics/weekly/{athlete_id} vs /api/analytics/weekly/team/overview (~40 lines duplicated). Extract aggregate_by_week(sessions, weeks, today) -> list helper.",
+    "/api/analytics/team avg_wellness denominator uses wellness_count (athletes with wellness_7d>0). An athlete with no recent sessions but seeded wellness on older sessions returns wellness_7d=0 and is excluded — that's correct, but document it because it can make the dashboard 'Bem-Estar Médio' jump as athletes age out of the 7-day window.",
+    "Wellness picker legend uses Portuguese text 'Esgotamento / Cansaço extremo / Energia moderada / Equilíbrio / Vitalidade plena' — does not exactly match the keywords specified in the PRD (esgotamento, cansaço, moderada, equilíbrio, vitalidade). All 5 ranges ARE present and the page reads correctly to a coach; just flagging for PRD alignment.",
+    "server.py is now 1615 lines — well past the 700-line guideline. Mandatory split before next feature phase."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase5_features.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 phase5 tests)",
+    "frontend": "100% on critical Phase 5 flows tested"
+  },
+  "test_credentials": "treinador@futsal.pt / treinador123 (from /app/memory/test_credentials.md, verified)",
+  "seed_data_creation": "phase5 module-scoped fixture re-seeds /api/seed/demo at start; verified seed produces wellness values in [4,9] across all sessions.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 5 verified end-to-end. Backend tests in /app/backend/tests/test_phase5_features.py (11 tests; module-scoped fixture re-seeds demo). Frontend Playwright confirmed: Dashboard metric-avg-wellness=6.5/10; /resumo-semanal default 'Equipa (Visão Geral)', 9 options, weeks-range [4,8,12] switchable, all 3 charts (load/sleep/wellness) + weekly-table render; LogSession /registar-sessao has 10/10 wellness buttons + legend + successful submit (toast 'Sessão registada — Carga 375 UA'); AthleteDetail metric-wellness 7.5/10, Bem-Estar column shows X/10, 30 edit-session-* buttons in sessions table, inline edit reveals edit-date/rpe/duration/sleep/wellness + save/cancel; saving rpe=9 persisted and row text updated to '90min 4/5 9/10 810' (recomputed load). Console emits Recharts width(-1) warnings repeatedly — carried over from iter 4 and still cosmetic.",
+  "tested_features": {
+    "backend_session_wellness_field": "PASS — POST accepts wellness 1-10, default=7 when omitted, out-of-range (11) rejected (422).",
+    "backend_seed_wellness_range": "PASS — all seeded sessions have wellness in [4,9].",
+    "backend_session_put_recomputes_load": "PASS — PUT updates rpe/duration/wellness, load recomputed (7*60=420, 7*90=630), updated_at set, persistence verified via subsequent GET; 404 on unknown id.",
+    "backend_metrics_wellness_fields": "PASS — wellness_7d, wellness_zone in {depleted|fatigued|moderate|good|excellent|no_data}, avg_wellness returned.",
+    "backend_wellness_risk_integration": "PASS — injecting 7 sessions with wellness=1 lands athlete in fatigued/depleted zone, risk escalates to warning/danger, reason text includes 'Bem-estar corporal crítico' / 'Bem-estar corporal baixo'.",
+    "backend_weekly_athlete_endpoint": "PASS — /api/analytics/weekly/{athlete_id}?weeks=8 returns {athlete, weeks[8], evolution, evolution_pct}; each week has week/label(Sxx/yy)/start_date/end_date(7-day span)/sessions/total_load/avg_load/avg_sleep/avg_wellness/delta_load/delta_load_pct.",
+    "backend_weekly_team_overview": "PASS — returns {team, athletes_count, weeks[8], evolution, evolution_pct}; each week has avg_wellness.",
+    "backend_team_summary_avg_wellness": "PASS — /api/analytics/team summary contains numeric avg_wellness alongside existing fields.",
+    "frontend_dashboard_avg_wellness_card": "PASS — metric-avg-wellness card 'Bem-Estar Médio 6.5/10' visible.",
+    "frontend_nav_weekly_replaces_monthly": "PASS — nav-weekly present, nav-monthly removed.",
+    "frontend_weekly_summary_page": "PASS — all 8 testids render (weekly-athlete-select default '__team__' with 9 options incl. team + 8 athletes, weeks-range [4,8,12], weekly-team-label hides on athlete switch, evolution-headline + 3 charts + weekly-table).",
+    "frontend_log_session_wellness_picker": "PASS — 10 wellness-1..10 buttons + Portuguese legend (Esgotamento / Cansaço extremo / Energia moderada / Equilíbrio / Vitalidade plena); selecting + submitting persists session (server toast 'Sessão registada — Carga 375 UA').",
+    "frontend_athlete_detail_metric_wellness": "PASS — metric-wellness card 'Bem-Estar (7d) 7.5/10', Bem-Estar column in sessions table.",
+    "frontend_athlete_detail_inline_edit": "PASS — 30 edit-session-* buttons; clicking opens inline edit row with date/rpe/duration/sleep/wellness inputs + save/cancel; saving rpe=9 updates row '90min 4/5 9/10 810' (load 9*90=810 ✓) and toast 'Sessão atualizada' visible."
+  },
+  "rca_of_the_issue": "No bugs found in Phase 5. The only carryover is cosmetic Recharts width(-1)/height(-1) console warnings (raised in iter 4) emitted because ResponsiveContainer briefly measures 0×0 on initial mount and on every selector/range change. Charts still render correctly. Backend wellness avg over last 7 days is computed per-session (not per-day) — a minor design note, not a bug, but worth aligning with how 'load' is computed (per-day) if multi-session days become common."
+}

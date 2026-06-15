@@ -143,11 +143,12 @@ export default function Dashboard() {
       {data?.team && (data.athletes || []).length > 0 && (
         <>
           {/* Team metrics */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
             <MetricCard label="Atletas" value={data.summary.athletes_count} testid="metric-athletes" />
             <MetricCard label="Carga Aguda Média" value={data.summary.avg_acute} unit="UA" testid="metric-avg-acute" />
             <MetricCard label="Carga Crónica Média" value={data.summary.avg_chronic} unit="UA" accent testid="metric-avg-chronic" />
             <MetricCard label="Sono Médio" value={data.summary.avg_sleep || "—"} unit="/5" testid="metric-avg-sleep" />
+            <MetricCard label="Bem-Estar Médio" value={data.summary.avg_wellness || "—"} unit="/10" testid="metric-avg-wellness" />
             <MetricCard label="Monotonia Média" value={data.summary.avg_monotony || "—"} testid="metric-avg-monotony" zoneCol={data.summary.avg_monotony ? (data.summary.avg_monotony_zone === "critical" ? "#FF3B30" : data.summary.avg_monotony_zone === "moderate_high" ? "#FFEA00" : "#00E676") : null} />
             <MetricCard label="C/ Dados Suficientes" value={`${data.summary.athletes_with_sufficient_data}/${data.summary.athletes_count}`} testid="metric-sufficient" />
           </div>

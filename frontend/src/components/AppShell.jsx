@@ -8,7 +8,7 @@ const links = [
   { to: "/atletas", label: "Atletas", icon: Users, testid: "nav-athletes" },
   { to: "/registar-sessao", label: "Registar Sessão", icon: ClipboardEdit, testid: "nav-log" },
   { to: "/calendario", label: "Calendário", icon: CalendarDays, testid: "nav-calendar" },
-  { to: "/resumo-mensal", label: "Resumo Mensal", icon: CalendarRange, testid: "nav-monthly" },
+  { to: "/resumo-semanal", label: "Resumo Semanal", icon: CalendarRange, testid: "nav-weekly" },
   { to: "/comparar", label: "Comparar", icon: GitCompareArrows, testid: "nav-compare" },
 ];
 

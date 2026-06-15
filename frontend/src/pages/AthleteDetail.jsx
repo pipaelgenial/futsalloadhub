@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { RiskBadge, MetricCard, zoneColor } from "@/components/Bits";
 import InjuriesPanel from "@/components/InjuriesPanel";
 import PlayerAvatar from "@/components/PlayerAvatar";
-import { ArrowLeft, Trash2, ShieldAlert } from "lucide-react";
+import { ArrowLeft, Trash2, ShieldAlert, Pencil, X, Check } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceArea, CartesianGrid,
 } from "recharts";
@@ -15,6 +15,9 @@ export default function AthleteDetail() {
   const [data, setData] = useState(null);
   const [injuries, setInjuries] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(null); // session id being edited
+  const [editForm, setEditForm] = useState({});
+  const [saving, setSaving] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -30,6 +33,39 @@ export default function AthleteDetail() {
   }
 
   useEffect(() => { load(); }, [id]);
+
+  function startEdit(s) {
+    setEditing(s.id);
+    setEditForm({
+      date: s.date,
+      rpe: s.rpe,
+      duration_min: s.duration_min,
+      sleep_quality: s.sleep_quality,
+      wellness: s.wellness ?? 7,
+      notes: s.notes || "",
+    });
+  }
+
+  function cancelEdit() { setEditing(null); setEditForm({}); }
+
+  async function saveEdit(sid) {
+    setSaving(true);
+    try {
+      await http.put(`/sessions/${sid}`, {
+        date: editForm.date,
+        rpe: Number(editForm.rpe),
+        duration_min: Number(editForm.duration_min),
+        sleep_quality: Number(editForm.sleep_quality),
+        wellness: Number(editForm.wellness),
+        notes: editForm.notes || null,
+      });
+      toast.success("Sessão atualizada");
+      setEditing(null);
+      setEditForm({});
+      load();
+    } catch (err) { toast.error(formatApiError(err)); }
+    finally { setSaving(false); }
+  }
 
   async function delSession(sid) {
     if (!window.confirm("Eliminar sessão?")) return;
@@ -109,12 +145,25 @@ export default function AthleteDetail() {
         );
       })()}
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <MetricCard label="Carga Aguda" value={metrics.acute} unit="UA" testid="metric-acute" />
         <MetricCard label="Carga Crónica" value={metrics.chronic} unit="UA" testid="metric-chronic" />
         <MetricCard label="ACWR" value={metrics.sufficient_data ? metrics.acwr : "—"} accent testid="metric-acwr" zoneCol={metrics.sufficient_data ? zoneColor(metrics.acwr_zone) : null} />
         <MetricCard label="Monotonia" value={metrics.monotony || "—"} testid="metric-monotony" zoneCol={metrics.monotony ? zoneColor(metrics.monotony_zone) : null} />
         <MetricCard label="Strain" value={metrics.strain || "—"} testid="metric-strain" zoneCol={metrics.strain ? zoneColor(metrics.strain_zone) : null} />
+        <MetricCard
+          label="Bem-Estar (7d)"
+          value={metrics.wellness_7d || "—"}
+          unit={metrics.wellness_7d ? "/10" : null}
+          testid="metric-wellness"
+          zoneCol={metrics.wellness_7d ? (
+            metrics.wellness_zone === "depleted" ? "#FF3B30"
+            : metrics.wellness_zone === "fatigued" ? "#FF9500"
+            : metrics.wellness_zone === "moderate" ? "#FFEA00"
+            : metrics.wellness_zone === "good" ? "#00E676"
+            : "#CCFF00"
+          ) : null}
+        />
       </div>
 
       <div className="fld-card">
@@ -169,25 +218,69 @@ export default function AthleteDetail() {
                   <th className="py-3 px-2">RPE</th>
                   <th className="py-3 px-2">Duração</th>
                   <th className="py-3 px-2">Sono</th>
+                  <th className="py-3 px-2">Bem-Estar</th>
                   <th className="py-3 px-2 text-[#CCFF00]">Carga</th>
-                  <th className="py-3 px-2"></th>
+                  <th className="py-3 px-2 text-right">Ações</th>
                 </tr>
               </thead>
               <tbody>
-                {sessions.slice(0, 30).map((s) => (
-                  <tr key={s.id} className="border-b border-white/5">
-                    <td className="py-2 pr-4">{s.date}</td>
-                    <td className="py-2 px-2 metric-num">{s.rpe}</td>
-                    <td className="py-2 px-2">{s.duration_min}min</td>
-                    <td className="py-2 px-2">{s.sleep_quality}/5</td>
-                    <td className="py-2 px-2 metric-num text-[#CCFF00]">{s.load}</td>
-                    <td className="py-2 px-2 text-right">
-                      <button onClick={() => delSession(s.id)} className="text-[#525252] hover:text-[#FF3B30]">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {sessions.slice(0, 30).map((s) => {
+                  const isEditing = editing === s.id;
+                  const wellness = s.wellness ?? "—";
+                  if (isEditing) {
+                    const computed = (Number(editForm.rpe) || 0) * (Number(editForm.duration_min) || 0);
+                    return (
+                      <tr key={s.id} className="border-b border-white/5 bg-white/[0.02]" data-testid={`edit-row-${s.id}`}>
+                        <td className="py-2 pr-4">
+                          <input type="date" className="fld-input py-1 px-2 text-sm" value={editForm.date} onChange={(e) => setEditForm({ ...editForm, date: e.target.value })} data-testid={`edit-date-${s.id}`} />
+                        </td>
+                        <td className="py-2 px-2">
+                          <input type="number" min="1" max="10" className="fld-input py-1 px-2 w-16 text-sm metric-num" value={editForm.rpe} onChange={(e) => setEditForm({ ...editForm, rpe: e.target.value })} data-testid={`edit-rpe-${s.id}`} />
+                        </td>
+                        <td className="py-2 px-2">
+                          <input type="number" min="1" max="300" className="fld-input py-1 px-2 w-20 text-sm" value={editForm.duration_min} onChange={(e) => setEditForm({ ...editForm, duration_min: e.target.value })} data-testid={`edit-duration-${s.id}`} />
+                        </td>
+                        <td className="py-2 px-2">
+                          <input type="number" min="1" max="5" className="fld-input py-1 px-2 w-14 text-sm" value={editForm.sleep_quality} onChange={(e) => setEditForm({ ...editForm, sleep_quality: e.target.value })} data-testid={`edit-sleep-${s.id}`} />
+                        </td>
+                        <td className="py-2 px-2">
+                          <input type="number" min="1" max="10" className="fld-input py-1 px-2 w-14 text-sm" value={editForm.wellness} onChange={(e) => setEditForm({ ...editForm, wellness: e.target.value })} data-testid={`edit-wellness-${s.id}`} />
+                        </td>
+                        <td className="py-2 px-2 metric-num text-[#CCFF00]">{computed}</td>
+                        <td className="py-2 px-2">
+                          <div className="flex justify-end gap-2">
+                            <button onClick={() => saveEdit(s.id)} disabled={saving} className="text-[#CCFF00] hover:text-white" data-testid={`save-session-${s.id}`} title="Guardar">
+                              <Check className="w-4 h-4" />
+                            </button>
+                            <button onClick={cancelEdit} className="text-[#525252] hover:text-white" data-testid={`cancel-session-${s.id}`} title="Cancelar">
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+                  return (
+                    <tr key={s.id} className="border-b border-white/5" data-testid={`session-row-${s.id}`}>
+                      <td className="py-2 pr-4">{s.date}</td>
+                      <td className="py-2 px-2 metric-num">{s.rpe}</td>
+                      <td className="py-2 px-2">{s.duration_min}min</td>
+                      <td className="py-2 px-2">{s.sleep_quality}/5</td>
+                      <td className="py-2 px-2 metric-num">{wellness}<span className="text-[#525252] text-xs">/10</span></td>
+                      <td className="py-2 px-2 metric-num text-[#CCFF00]">{s.load}</td>
+                      <td className="py-2 px-2">
+                        <div className="flex justify-end gap-2">
+                          <button onClick={() => startEdit(s)} className="text-[#525252] hover:text-[#CCFF00]" data-testid={`edit-session-${s.id}`} title="Editar">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => delSession(s.id)} className="text-[#525252] hover:text-[#FF3B30]" data-testid={`delete-session-${s.id}`} title="Eliminar">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

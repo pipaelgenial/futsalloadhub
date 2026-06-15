@@ -12,6 +12,7 @@ export default function LogSession() {
     rpe: 5,
     duration_min: 75,
     sleep_quality: 4,
+    wellness: 7,
     notes: "",
   });
   const [saving, setSaving] = useState(false);
@@ -36,6 +37,7 @@ export default function LogSession() {
         rpe: Number(form.rpe),
         duration_min: Number(form.duration_min),
         sleep_quality: Number(form.sleep_quality),
+        wellness: Number(form.wellness),
       });
       toast.success(`Sessão registada — Carga ${form.rpe * form.duration_min} UA`);
       setForm((f) => ({ ...f, notes: "" }));
@@ -104,6 +106,39 @@ export default function LogSession() {
                   {n}
                 </button>
               ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="fld-label">Bem-Estar Corporal (1-10)</label>
+            <div className="grid grid-cols-10 gap-1.5">
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
+                const color = n <= 2 ? "#FF3B30" : n <= 4 ? "#FF9500" : n <= 6 ? "#FFEA00" : n <= 8 ? "#00E676" : "#CCFF00";
+                const active = form.wellness === n;
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setForm({ ...form, wellness: n })}
+                    data-testid={`wellness-${n}`}
+                    className="py-3 font-head tracking-widest text-sm border transition-all"
+                    style={{
+                      background: active ? color : "transparent",
+                      color: active ? "#000" : "#fff",
+                      borderColor: active ? color : "rgba(255,255,255,0.15)",
+                    }}
+                  >
+                    {n}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="text-xs text-[#525252] mt-2 grid grid-cols-2 md:grid-cols-5 gap-1">
+              <span><span className="text-[#FF3B30]">1-2</span> Esgotamento / dor</span>
+              <span><span className="text-[#FF9500]">3-4</span> Cansaço extremo</span>
+              <span><span className="text-[#FFEA00]">5-6</span> Energia moderada</span>
+              <span><span className="text-[#00E676]">7-8</span> Equilíbrio bom</span>
+              <span><span className="text-[#CCFF00]">9-10</span> Vitalidade plena</span>
             </div>
           </div>
 

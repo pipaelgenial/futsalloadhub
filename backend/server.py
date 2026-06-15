@@ -125,6 +125,16 @@ class SessionIn(BaseModel):
     rpe: int = Field(ge=1, le=10)
     duration_min: int = Field(ge=1, le=300)
     sleep_quality: int = Field(ge=1, le=5)
+    wellness: int = Field(ge=1, le=10, default=7)  # bem-estar corporal 1-10
+    notes: Optional[str] = None
+
+
+class SessionUpdate(BaseModel):
+    date: Optional[str] = None
+    rpe: Optional[int] = Field(default=None, ge=1, le=10)
+    duration_min: Optional[int] = Field(default=None, ge=1, le=300)
+    sleep_quality: Optional[int] = Field(default=None, ge=1, le=5)
+    wellness: Optional[int] = Field(default=None, ge=1, le=10)
     notes: Optional[str] = None
 
 
@@ -356,6 +366,7 @@ async def create_session(data: SessionIn, user=Depends(get_current_user)):
         "rpe": data.rpe,
         "duration_min": data.duration_min,
         "sleep_quality": data.sleep_quality,
+        "wellness": data.wellness,
         "load": load,
         "notes": data.notes,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -363,6 +374,35 @@ async def create_session(data: SessionIn, user=Depends(get_current_user)):
     await db.sessions.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+@api.put("/sessions/{session_id}")
+async def update_session(session_id: str, data: SessionUpdate, user=Depends(get_current_user)):
+    team = await _get_team_or_404(user)
+    existing = await db.sessions.find_one({"id": session_id, "team_id": team["id"]})
+    if not existing:
+        raise HTTPException(404, "Sessão não encontrada")
+    updates = {}
+    if data.date is not None:
+        updates["date"] = data.date
+    if data.rpe is not None:
+        updates["rpe"] = data.rpe
+    if data.duration_min is not None:
+        updates["duration_min"] = data.duration_min
+    if data.sleep_quality is not None:
+        updates["sleep_quality"] = data.sleep_quality
+    if data.wellness is not None:
+        updates["wellness"] = data.wellness
+    if data.notes is not None:
+        updates["notes"] = data.notes
+    # recompute load if rpe or duration changed
+    new_rpe = updates.get("rpe", existing["rpe"])
+    new_dur = updates.get("duration_min", existing["duration_min"])
+    updates["load"] = new_rpe * new_dur
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.sessions.update_one({"id": session_id}, {"$set": updates})
+    refreshed = await db.sessions.find_one({"id": session_id}, {"_id": 0})
+    return refreshed
 
 
 @api.get("/sessions")
@@ -417,6 +457,8 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None)
             "total_sessions": 0,
             "avg_load": 0,
             "avg_sleep": 0,
+            "avg_wellness": 0,
+            "wellness_zone": "no_data",
         }
 
     first_date = min(dates_set)
@@ -480,7 +522,31 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None)
     else:
         acwr_zone = "high_risk"
 
-    # ---- Risk classification (combined ACWR + Monotonia + Strain) ----
+    # ---- Wellness (Bem-Estar Corporal) over last 7 days ----
+    recent_sessions = [
+        s for s in sessions
+        if _parse_date(s["date"]) >= ref_date - timedelta(days=6)
+        and "wellness" in s and s.get("wellness") is not None
+    ]
+    if recent_sessions:
+        avg_wellness_7d = round(sum(s["wellness"] for s in recent_sessions) / len(recent_sessions), 1)
+    else:
+        avg_wellness_7d = 0
+
+    if avg_wellness_7d == 0:
+        wellness_zone = "no_data"
+    elif avg_wellness_7d <= 2:
+        wellness_zone = "depleted"
+    elif avg_wellness_7d <= 4:
+        wellness_zone = "fatigued"
+    elif avg_wellness_7d <= 6:
+        wellness_zone = "moderate"
+    elif avg_wellness_7d <= 8:
+        wellness_zone = "good"
+    else:
+        wellness_zone = "excellent"
+
+    # ---- Risk classification (combined ACWR + Monotonia + Strain + Bem-Estar) ----
     risk_reasons = []
     if not sufficient:
         risk = "insufficient"
@@ -522,6 +588,19 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None)
             if base == "safe":
                 base = "warning"
 
+        # Bem-Estar Corporal contribution (last 7 days)
+        if wellness_zone == "depleted":
+            risk_reasons.append("Bem-estar corporal crítico (1–2) — esgotamento profundo / dor / doença")
+            base = "danger"
+        elif wellness_zone == "fatigued":
+            risk_reasons.append("Bem-estar corporal baixo (3–4) — cansaço extremo / letargia")
+            if base == "safe":
+                base = "warning"
+            elif base == "warning":
+                base = "danger"
+        elif wellness_zone == "moderate":
+            risk_reasons.append("Bem-estar moderado (5–6) — alguma tensão")
+
         risk = base
 
     risk_label_map = {
@@ -539,6 +618,8 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None)
 
     avg_load = round(sum(s["load"] for s in sessions) / len(sessions), 1)
     avg_sleep = round(sum(s["sleep_quality"] for s in sessions) / len(sessions), 1)
+    wellness_vals = [s.get("wellness") for s in sessions if s.get("wellness") is not None]
+    avg_wellness = round(sum(wellness_vals) / len(wellness_vals), 1) if wellness_vals else 0
 
     return {
         "acute": round(acute, 1),
@@ -549,6 +630,9 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None)
         "monotony_zone": mono_zone,
         "strain": strain,
         "strain_zone": strain_zone,
+        "wellness_7d": avg_wellness_7d,
+        "wellness_zone": wellness_zone,
+        "avg_wellness": avg_wellness,
         "risk": risk,
         "risk_label": risk_label_map.get(risk, ""),
         "risk_description": risk_description,
@@ -609,7 +693,9 @@ async def analytics_team(user=Depends(get_current_user)):
     total_chronic = 0
     total_monotony = 0
     total_sleep = 0
+    total_wellness = 0
     sleep_count = 0
+    wellness_count = 0
     counted = 0
     risk_counts = {"safe": 0, "warning": 0, "danger": 0, "insufficient": 0, "low": 0, "no_data": 0}
     for a in athletes:
@@ -626,6 +712,9 @@ async def analytics_team(user=Depends(get_current_user)):
         if m.get("avg_sleep"):
             total_sleep += m["avg_sleep"]
             sleep_count += 1
+        if m.get("wellness_7d"):
+            total_wellness += m["wellness_7d"]
+            wellness_count += 1
 
     monotony_count = sum(1 for a in out_athletes if a["metrics"].get("monotony"))
     avg_monotony = round(total_monotony / monotony_count, 2) if monotony_count else 0
@@ -645,6 +734,7 @@ async def analytics_team(user=Depends(get_current_user)):
         "avg_acute": round(total_acute / counted, 1) if counted else 0,
         "avg_chronic": round(total_chronic / counted, 1) if counted else 0,
         "avg_sleep": round(total_sleep / sleep_count, 2) if sleep_count else 0,
+        "avg_wellness": round(total_wellness / wellness_count, 2) if wellness_count else 0,
         "avg_monotony": avg_monotony,
         "avg_monotony_zone": mono_zone,
         "risk_counts": risk_counts,
@@ -654,9 +744,117 @@ async def analytics_team(user=Depends(get_current_user)):
 
 
 # ---------------------- Monthly Summary ----------------------
+def _week_key(d: date) -> str:
+    """Return ISO week key as YYYY-Www."""
+    iso = d.isocalendar()
+    return f"{iso[0]:04d}-W{iso[1]:02d}"
+
+
+def _week_start(year: int, week: int) -> date:
+    """Return Monday date of given ISO year + week."""
+    return date.fromisocalendar(year, week, 1)
+
+
+def _format_week_label(key: str) -> str:
+    y, w = key.split("-W")
+    return f"S{int(w):02d}/{y[-2:]}"
+
+
+def _last_n_weeks(today_d: date, n: int):
+    """Return list of last n ISO week keys ending with current week."""
+    keys = []
+    iso = today_d.isocalendar()
+    y, w = iso[0], iso[1]
+    for _ in range(n):
+        keys.append(f"{y:04d}-W{w:02d}")
+        # go back one week
+        first_of_week = date.fromisocalendar(y, w, 1)
+        prev = first_of_week - timedelta(days=1)
+        iso2 = prev.isocalendar()
+        y, w = iso2[0], iso2[1]
+    keys.reverse()
+    return keys
+
+
+@api.get("/analytics/weekly/{athlete_id}")
+async def weekly_summary(athlete_id: str, weeks: int = 8, user=Depends(get_current_user)):
+    """Weekly average load + sleep + wellness + evolution vs previous week, last N weeks."""
+    team = await _get_team_or_404(user)
+    athlete = await db.athletes.find_one({"id": athlete_id, "team_id": team["id"]}, {"_id": 0})
+    if not athlete:
+        raise HTTPException(404, "Atleta não encontrado")
+    sessions = await db.sessions.find({"athlete_id": athlete_id}, {"_id": 0}).to_list(5000)
+
+    by_week = defaultdict(list)
+    for s in sessions:
+        d = _parse_date(s["date"])
+        by_week[_week_key(d)].append(s)
+
+    today_d = date.today()
+    keys = _last_n_weeks(today_d, weeks)
+
+    weeks_out = []
+    prev_avg = None
+    for k in keys:
+        ws = by_week.get(k, [])
+        if ws:
+            total_load = sum(s["load"] for s in ws)
+            avg_load = round(total_load / len(ws), 1)
+            avg_sleep = round(sum(s["sleep_quality"] for s in ws) / len(ws), 2)
+            wellness_vals = [s.get("wellness") for s in ws if s.get("wellness") is not None]
+            avg_wellness = round(sum(wellness_vals) / len(wellness_vals), 1) if wellness_vals else 0
+            sessions_count = len(ws)
+        else:
+            total_load = 0
+            avg_load = 0
+            avg_sleep = 0
+            avg_wellness = 0
+            sessions_count = 0
+        delta = None
+        delta_pct = None
+        if prev_avg is not None and prev_avg > 0 and avg_load > 0:
+            delta = round(avg_load - prev_avg, 1)
+            delta_pct = round((avg_load - prev_avg) / prev_avg * 100, 1)
+        if avg_load > 0:
+            prev_avg = avg_load
+        # parse week start date
+        y, w = k.split("-W")
+        start_d = _week_start(int(y), int(w))
+        weeks_out.append({
+            "week": k,
+            "label": _format_week_label(k),
+            "start_date": start_d.isoformat(),
+            "end_date": (start_d + timedelta(days=6)).isoformat(),
+            "sessions": sessions_count,
+            "total_load": round(total_load, 1),
+            "avg_load": avg_load,
+            "avg_sleep": avg_sleep,
+            "avg_wellness": avg_wellness,
+            "delta_load": delta,
+            "delta_load_pct": delta_pct,
+        })
+
+    valid = [m for m in weeks_out if m["avg_load"] > 0]
+    if len(valid) >= 2:
+        first_v = valid[0]["avg_load"]
+        last_v = valid[-1]["avg_load"]
+        evolution = "subiu" if last_v > first_v else "desceu" if last_v < first_v else "estável"
+        evolution_pct = round((last_v - first_v) / first_v * 100, 1) if first_v > 0 else 0
+    else:
+        evolution = "indeterminado"
+        evolution_pct = 0
+
+    return {
+        "athlete": athlete,
+        "weeks": weeks_out,
+        "evolution": evolution,
+        "evolution_pct": evolution_pct,
+    }
+
+
 @api.get("/analytics/monthly/{athlete_id}")
 async def monthly_summary(athlete_id: str, months: int = 6, user=Depends(get_current_user)):
-    """Monthly average load + sleep + evolution vs previous month, last N months."""
+    """[Legacy] Monthly summary kept for backward compatibility."""
     team = await _get_team_or_404(user)
     athlete = await db.athletes.find_one({"id": athlete_id, "team_id": team["id"]}, {"_id": 0})
     if not athlete:
@@ -1029,6 +1227,82 @@ async def team_detailed(user=Depends(get_current_user)):
     return {"team": team, "metrics": metrics, "series": series, "n_athletes": n_athletes}
 
 
+@api.get("/analytics/weekly/team/overview")
+async def weekly_team_overview(weeks: int = 8, user=Depends(get_current_user)):
+    """Team-wide weekly aggregates."""
+    team = await db.teams.find_one({"user_id": user["id"]}, {"_id": 0})
+    if not team:
+        raise HTTPException(400, "Insira dados da equipa primeiro")
+    athletes_count = await db.athletes.count_documents({"team_id": team["id"]})
+    sessions = await db.sessions.find({"team_id": team["id"]}, {"_id": 0}).to_list(20000)
+
+    by_week = defaultdict(list)
+    for s in sessions:
+        d = _parse_date(s["date"])
+        by_week[_week_key(d)].append(s)
+
+    today_d = date.today()
+    keys = _last_n_weeks(today_d, weeks)
+
+    weeks_out = []
+    prev_avg = None
+    for k in keys:
+        ws = by_week.get(k, [])
+        if ws:
+            total_load = sum(s["load"] for s in ws)
+            avg_load = round(total_load / len(ws), 1)
+            avg_sleep = round(sum(s["sleep_quality"] for s in ws) / len(ws), 2)
+            wellness_vals = [s.get("wellness") for s in ws if s.get("wellness") is not None]
+            avg_wellness = round(sum(wellness_vals) / len(wellness_vals), 1) if wellness_vals else 0
+            sessions_count = len(ws)
+        else:
+            total_load = 0
+            avg_load = 0
+            avg_sleep = 0
+            avg_wellness = 0
+            sessions_count = 0
+        delta = None
+        delta_pct = None
+        if prev_avg is not None and prev_avg > 0 and avg_load > 0:
+            delta = round(avg_load - prev_avg, 1)
+            delta_pct = round((avg_load - prev_avg) / prev_avg * 100, 1)
+        if avg_load > 0:
+            prev_avg = avg_load
+        y, w = k.split("-W")
+        start_d = _week_start(int(y), int(w))
+        weeks_out.append({
+            "week": k,
+            "label": _format_week_label(k),
+            "start_date": start_d.isoformat(),
+            "end_date": (start_d + timedelta(days=6)).isoformat(),
+            "sessions": sessions_count,
+            "total_load": round(total_load, 1),
+            "avg_load": avg_load,
+            "avg_sleep": avg_sleep,
+            "avg_wellness": avg_wellness,
+            "delta_load": delta,
+            "delta_load_pct": delta_pct,
+        })
+
+    valid = [m for m in weeks_out if m["avg_load"] > 0]
+    if len(valid) >= 2:
+        first_v = valid[0]["avg_load"]
+        last_v = valid[-1]["avg_load"]
+        evolution = "subiu" if last_v > first_v else "desceu" if last_v < first_v else "estável"
+        evolution_pct = round((last_v - first_v) / first_v * 100, 1) if first_v > 0 else 0
+    else:
+        evolution = "indeterminado"
+        evolution_pct = 0
+
+    return {
+        "team": team,
+        "athletes_count": athletes_count,
+        "weeks": weeks_out,
+        "evolution": evolution,
+        "evolution_pct": evolution_pct,
+    }
+
+
 @api.get("/analytics/monthly/team/overview")
 async def monthly_team_overview(months: int = 6, user=Depends(get_current_user)):
     """Team-wide monthly aggregates."""
@@ -1172,6 +1446,7 @@ async def seed_demo(user=Depends(get_current_user)):
                 rpe = min(10, rpe + 2)
                 duration += 20
             sleep = random.randint(2, 5)
+            wellness = random.randint(4, 9)
             sessions_to_insert.append({
                 "id": str(uuid.uuid4()),
                 "athlete_id": aid,
@@ -1180,6 +1455,7 @@ async def seed_demo(user=Depends(get_current_user)):
                 "rpe": rpe,
                 "duration_min": duration,
                 "sleep_quality": sleep,
+                "wellness": wellness,
                 "load": rpe * duration,
                 "notes": None,
                 "created_at": datetime.now(timezone.utc).isoformat(),

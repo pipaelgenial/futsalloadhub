@@ -9,6 +9,7 @@ import Athletes from "@/pages/Athletes";
 import LogSession from "@/pages/LogSession";
 import AthleteDetail from "@/pages/AthleteDetail";
 import MonthlySummary from "@/pages/MonthlySummary";
+import WeeklySummary from "@/pages/WeeklySummary";
 import Compare from "@/pages/Compare";
 import CalendarPage from "@/pages/Calendar";
 import AppShell from "@/components/AppShell";
@@ -47,6 +48,7 @@ export default function App() {
           <Route path="/atletas" element={<Protected><Athletes /></Protected>} />
           <Route path="/atletas/:id" element={<Protected><AthleteDetail /></Protected>} />
           <Route path="/registar-sessao" element={<Protected><LogSession /></Protected>} />
+          <Route path="/resumo-semanal" element={<Protected><WeeklySummary /></Protected>} />
           <Route path="/resumo-mensal" element={<Protected><MonthlySummary /></Protected>} />
           <Route path="/comparar" element={<Protected><Compare /></Protected>} />
           <Route path="/calendario" element={<Protected><CalendarPage /></Protected>} />
