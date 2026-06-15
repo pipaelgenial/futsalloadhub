@@ -3,7 +3,8 @@ import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import { RiskBadge, MetricCard, riskMeta } from "@/components/Bits";
-import { AlertTriangle, Database, ArrowRight } from "lucide-react";
+import PlayerAvatar from "@/components/PlayerAvatar";
+import { AlertTriangle, Database, ArrowRight, Trash2 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceArea, CartesianGrid,
   BarChart, Bar, Cell,
@@ -46,6 +47,25 @@ export default function Dashboard() {
     } finally { setSeeding(false); }
   }
 
+  async function resetAll() {
+    const txt = window.prompt(
+      "Esta ação elimina TODOS os dados: equipa, atletas, sessões, lesões e fotos.\n\nEscreva ELIMINAR (em maiúsculas) para confirmar:"
+    );
+    if (txt !== "ELIMINAR") {
+      if (txt !== null) toast.error("Confirmação inválida — operação cancelada");
+      return;
+    }
+    setSeeding(true);
+    try {
+      const { data } = await http.post("/reset-all");
+      const d = data.deleted || {};
+      toast.success(`Todos os dados foram eliminados (${d.athletes || 0} atletas, ${d.sessions || 0} sessões, ${d.injuries || 0} lesões)`);
+      setTeamSeries([]);
+      await load();
+    } catch (err) { toast.error(formatApiError(err)); }
+    finally { setSeeding(false); }
+  }
+
   if (loading) return <div className="text-[#A3A3A3] font-head tracking-widest">A CARREGAR...</div>;
 
   const noTeam = !data?.team;
@@ -64,9 +84,18 @@ export default function Dashboard() {
             </div>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button onClick={seedDemo} disabled={seeding} className="fld-btn-ghost flex items-center gap-2" data-testid="seed-demo-btn">
             <Database className="w-4 h-4" /> {seeding ? "A GERAR..." : "DADOS DEMO"}
+          </button>
+          <button
+            onClick={resetAll}
+            disabled={seeding || !data?.team}
+            className="font-head font-bold uppercase tracking-widest px-5 py-2.5 text-xs flex items-center gap-2 transition-all border bg-transparent border-[#FF3B30]/30 text-[#FF3B30] hover:bg-[#FF3B30]/10 disabled:opacity-30 disabled:cursor-not-allowed"
+            data-testid="reset-all-btn"
+            title="Elimina todos os dados (irreversível)"
+          >
+            <Trash2 className="w-3.5 h-3.5" /> RESET TOTAL
           </button>
         </div>
       </div>
@@ -110,15 +139,25 @@ export default function Dashboard() {
                 </div>
                 <div className="grid md:grid-cols-2 gap-3">
                   {[...danger, ...warning].map((a) => (
-                    <Link key={a.id} to={`/atletas/${a.id}`} className="flex items-center justify-between p-3 border border-white/5 hover:border-white/20 transition-colors" data-testid={`alert-row-${a.id}`}>
-                      <div>
-                        <div className="font-semibold">{a.name}</div>
-                        <div className="text-xs text-[#A3A3A3]">ACWR <span className="metric-num text-white">{a.metrics.acwr}</span> · Aguda {a.metrics.acute} · Crónica {a.metrics.chronic}</div>
+                    <Link key={a.id} to={`/atletas/${a.id}`} className="flex items-start gap-3 p-3 border border-white/5 hover:border-white/20 transition-colors" data-testid={`alert-row-${a.id}`}>
+                      <PlayerAvatar athlete={a} size={48} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <div className="font-semibold">{a.name}</div>
+                          <RiskBadge risk={a.metrics.risk} />
+                        </div>
+                        <div className="text-xs text-[#A3A3A3] mb-1">
+                          ACWR <span className="metric-num text-white">{a.metrics.acwr}</span>
+                          {" · "}Mono <span className="metric-num text-white">{a.metrics.monotony || "—"}</span>
+                          {" · "}Strain <span className="metric-num text-white">{a.metrics.strain || "—"}</span>
+                        </div>
+                        {a.metrics.risk_description && (
+                          <div className="text-xs text-[#FFEA00]/80 leading-snug" data-testid={`alert-desc-${a.id}`}>
+                            {a.metrics.risk_description}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-2">
-                        <RiskBadge risk={a.metrics.risk} />
-                        <ArrowRight className="w-4 h-4 text-[#525252]" />
-                      </div>
+                      <ArrowRight className="w-4 h-4 text-[#525252] mt-2 flex-shrink-0" />
                     </Link>
                   ))}
                 </div>

@@ -1,0 +1,52 @@
+{
+  "summary": "Phase 3 testing complete. Validated refined risk model (acwr_zone/monotony_zone/strain_zone/risk_label/risk_description/risk_reasons), POST /api/reset-all wiping team+athletes+sessions+injuries+photos, per-athlete photo upload (JPG/PNG/WebP, <=5MB, public GET, DELETE), and frontend integration (Dashboard RESET TOTAL button with confirmation prompt, inline metrics + alert-desc in alerts panel, PlayerAvatar on Athletes page + AthleteDetail with risk_description). 12/12 new backend tests pass; all frontend critical flows pass.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase3_features.py",
+    "/app/test_reports/pytest/phase3_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "compute_metrics_for_athlete: the user-requested ACWR threshold spec was 'ACWR 1.3-1.5 = alert' but code uses 'acwr<1.5' (open right) so a value of exactly 1.5 falls into high_risk. Spec said '>=1.5 = high_risk' so this is consistent — OK, just confirm threshold inclusive/exclusive in docs.",
+    "compute_metrics_for_athlete: ACWR==0 is treated as 'no recent training' and risk forced to 'low' (Baixa Carga), but acwr can be 0 either because no sessions OR chronic==0. Consider distinguishing.",
+    "POST /api/athletes/{id}/photo: file size check happens AFTER full read; for large uploads this still consumes memory. Consider streaming size check, or rely on Content-Length header for early reject.",
+    "GET /api/athletes/{id}/photo is intentionally public — fine for <img src>, but anyone with a UUID can fetch. Acceptable trade-off; document this.",
+    "server.py is now 998 lines and trending toward the 700-line guideline. Consider splitting into routers (auth.py, athletes.py, analytics.py, photos.py).",
+    "/api/reset-all uses POST without CSRF protection. JWT in httpOnly cookie + same-site=none means a malicious site could POST it cross-origin since CORS allows credentials with *. Tighten FRONTEND_URL env or add a confirmation token from frontend body."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase3_features.py (new)"
+  ],
+  "success_rate": { "backend": "100% (12/12 phase3 tests)", "frontend": "100% on critical flows tested" },
+  "test_credentials": "treinador@futsal.pt / treinador123",
+  "seed_data_creation": "Used POST /api/seed/demo for fixture; phase3 tests insert/clean their own TEST_ sessions and end by calling /api/reset-all. Note: after running test_phase3_features.py the user's data is fully wiped — re-seed via /api/seed/demo to retest UI.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 3 verified. Backend tests live in /app/backend/tests/test_phase3_features.py. TestResetAll wipes data at the end — run /api/seed/demo before manual UI demos. Frontend critical flows verified via Playwright: login → dashboard reset-all-btn cancel (wrong prompt text) → athletes page (8 avatars + upload buttons) → athlete detail (avatar + risk_description + metric cards) → photo upload via photo-input-{id} (img src becomes /api/athletes/{id}/photo?v=... with cache-buster, remove-photo button appears) → dashboard correct reset with 'ELIMINAR' → no-team-state shown. Toast 'Todos os dados foram eliminados (8 atletas, 224 sessões, 3 lesões)' confirms backend response. Note: route URL is '/' for dashboard (not /dashboard).",
+  "tested_features": {
+    "risk_zones_fields_present": "PASS — acwr_zone/monotony_zone/strain_zone/risk_label/risk_description/risk_reasons returned for every athlete in /api/analytics/team.",
+    "zone_thresholds_consistent": "PASS — per-athlete numeric value mapped to declared zone for ACWR (<0.8, ≤1.3, <1.5, else), monotony (<1.0, ≤1.5, ≤2.0, else), strain (<1500, ≤3000, ≤6000, else).",
+    "monotony_critical_escalates_to_danger": "PASS — injected 7 consecutive monotonous sessions (rpe=10, dur≈90); monotony>2.0, strain_zone=extreme, risk=danger, risk_reasons mentions 'Monotonia crítica' and 'Strain extremo'.",
+    "photo_upload_png": "PASS — returns ok:true, photo_path, url; athlete doc updated with photo_path.",
+    "photo_get_public": "PASS — unauthenticated request returns 200 with Content-Type image/png and valid PNG signature.",
+    "photo_upload_invalid_ext": "PASS — .txt rejected with 400.",
+    "photo_upload_oversize": "PASS — >5MB rejected with 400.",
+    "photo_upload_jpg_webp": "PASS — both accepted.",
+    "photo_delete": "PASS — DELETE clears photo_path; subsequent GET → 404.",
+    "photo_upload_unknown_athlete": "PASS — 404.",
+    "reset_all_deletes_everything": "PASS — counts returned ({team:1, athletes>=8, sessions>0, injuries>=3}); /api/team → null; /api/athletes → [].",
+    "reset_all_idempotent_no_data": "PASS — second call returns ok with deleted={team:0, ...}.",
+    "frontend_reset_all_btn_present": "PASS — visible next to DADOS DEMO in dashboard header.",
+    "frontend_reset_all_cancel_on_wrong_text": "PASS — entering 'WRONGTEXT' in window.prompt leaves athletes-overview intact.",
+    "frontend_reset_all_confirm_with_ELIMINAR": "PASS — 'ELIMINAR' triggers reset; dashboard shows no-team-state and success toast 'Todos os dados foram eliminados (8 atletas, 224 sessões, 3 lesões)'.",
+    "frontend_alert_rows_inline_metrics": "PASS — each alert row shows 'ACWR 0.78 · Mono 0.74 · Strain 1332' inline; alert-desc-{id} shows risk_description in yellow.",
+    "frontend_athletes_page_avatars": "PASS — 8 athlete cards each with avatar-{id} + upload-photo-{id} controls.",
+    "frontend_athlete_detail_avatar_and_risk_description": "PASS — big avatar visible; athlete-risk-description shows 'Sub-treinamento — ACWR abaixo de 0.8 (zona de destreinamento)'.",
+    "frontend_photo_upload_flow": "PASS — setting files on photo-input-{id} triggers POST; avatar img src updates to /api/athletes/{id}/photo?v=<timestamp>; remove-photo-{id} button appears."
+  }
+}

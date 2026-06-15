@@ -15,6 +15,29 @@ export function riskMeta(risk) {
   }
 }
 
+export function zoneColor(zone) {
+  // Color per zone matching domain (Monotonia/Strain/ACWR)
+  const map = {
+    // Monotonia
+    high_variation: "#00E676",
+    ideal: "#00E676",
+    moderate_high: "#FFEA00",
+    critical: "#FF3B30",
+    // Strain
+    low: "#A3A3A3",
+    moderate: "#00E676",
+    elevated: "#FFEA00",
+    extreme: "#FF3B30",
+    // ACWR
+    detraining: "#FFEA00",
+    sweet_spot: "#00E676",
+    alert: "#FFEA00",
+    high_risk: "#FF3B30",
+    no_data: "#525252",
+  };
+  return map[zone] || "#A3A3A3";
+}
+
 export function RiskBadge({ risk, testid }) {
   const m = riskMeta(risk);
   return (
@@ -28,9 +51,12 @@ export function RiskBadge({ risk, testid }) {
   );
 }
 
-export function MetricCard({ label, value, unit, accent = false, testid }) {
+export function MetricCard({ label, value, unit, accent = false, testid, zoneCol }) {
   return (
-    <div className="fld-card" data-testid={testid}>
+    <div className="fld-card relative overflow-hidden" data-testid={testid}>
+      {zoneCol && (
+        <div className="absolute top-0 left-0 w-1 h-full" style={{ background: zoneCol }} />
+      )}
       <div className="fld-label">{label}</div>
       <div className={`metric-num text-4xl md:text-5xl ${accent ? "text-[#CCFF00]" : "text-white"}`}>
         {value}

@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
-import { RiskBadge, MetricCard } from "@/components/Bits";
+import { RiskBadge, MetricCard, zoneColor } from "@/components/Bits";
 import InjuriesPanel from "@/components/InjuriesPanel";
+import PlayerAvatar from "@/components/PlayerAvatar";
 import { ArrowLeft, Trash2, ShieldAlert } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceArea, CartesianGrid,
@@ -50,16 +51,26 @@ export default function AthleteDetail() {
         <ArrowLeft className="w-3.5 h-3.5" /> Voltar
       </Link>
 
-      <div className="flex items-end justify-between flex-wrap gap-4">
-        <div>
-          <div className="text-xs text-[#CCFF00] tracking-[0.3em] uppercase mb-2">Perfil de Atleta</div>
-          <h1 className="font-head text-5xl md:text-6xl font-black leading-none">{athlete.name}</h1>
-          <div className="mt-2 text-[#A3A3A3] text-sm">
-            {athlete.jersey_number && <span className="text-[#CCFF00] metric-num mr-2">#{athlete.jersey_number}</span>}
-            {athlete.position}
+      <div className="flex items-start justify-between flex-wrap gap-6">
+        <div className="flex items-center gap-5">
+          <PlayerAvatar athlete={athlete} size={96} editable onChange={load} />
+          <div>
+            <div className="text-xs text-[#CCFF00] tracking-[0.3em] uppercase mb-2">Perfil de Atleta</div>
+            <h1 className="font-head text-4xl md:text-5xl font-black leading-none">{athlete.name}</h1>
+            <div className="mt-2 text-[#A3A3A3] text-sm">
+              {athlete.jersey_number && <span className="text-[#CCFF00] metric-num mr-2">#{athlete.jersey_number}</span>}
+              {athlete.position}
+            </div>
           </div>
         </div>
-        <RiskBadge risk={metrics.risk} testid="athlete-risk-badge" />
+        <div className="text-right">
+          <RiskBadge risk={metrics.risk} testid="athlete-risk-badge" />
+          {metrics.risk_description && (
+            <div className="text-xs text-[#A3A3A3] max-w-md mt-2" data-testid="athlete-risk-description">
+              {metrics.risk_description}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Context alert: link risk + injuries */}
@@ -101,9 +112,9 @@ export default function AthleteDetail() {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <MetricCard label="Carga Aguda" value={metrics.acute} unit="UA" testid="metric-acute" />
         <MetricCard label="Carga Crónica" value={metrics.chronic} unit="UA" testid="metric-chronic" />
-        <MetricCard label="ACWR" value={metrics.sufficient_data ? metrics.acwr : "—"} accent testid="metric-acwr" />
-        <MetricCard label="Monotonia" value={metrics.monotony || "—"} testid="metric-monotony" />
-        <MetricCard label="Strain" value={metrics.strain || "—"} testid="metric-strain" />
+        <MetricCard label="ACWR" value={metrics.sufficient_data ? metrics.acwr : "—"} accent testid="metric-acwr" zoneCol={metrics.sufficient_data ? zoneColor(metrics.acwr_zone) : null} />
+        <MetricCard label="Monotonia" value={metrics.monotony || "—"} testid="metric-monotony" zoneCol={metrics.monotony ? zoneColor(metrics.monotony_zone) : null} />
+        <MetricCard label="Strain" value={metrics.strain || "—"} testid="metric-strain" zoneCol={metrics.strain ? zoneColor(metrics.strain_zone) : null} />
       </div>
 
       <div className="fld-card">

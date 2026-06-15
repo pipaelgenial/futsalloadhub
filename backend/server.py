@@ -14,7 +14,8 @@ from typing import List, Optional, Annotated
 from datetime import datetime, timezone, timedelta, date
 from collections import defaultdict
 
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File
+from fastapi.responses import FileResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
@@ -23,6 +24,10 @@ from pydantic import BaseModel, Field, EmailStr, ConfigDict
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+
+UPLOAD_DIR = ROOT_DIR / "uploads" / "athletes"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_IMG_EXT = {"jpg", "jpeg", "png", "webp"}
 
 app = FastAPI()
 api = APIRouter(prefix="/api")
@@ -251,9 +256,79 @@ async def create_athlete(data: AthleteIn, user=Depends(get_current_user)):
 @api.delete("/athletes/{athlete_id}")
 async def delete_athlete(athlete_id: str, user=Depends(get_current_user)):
     team = await _get_team_or_404(user)
+    # remove photo file
+    a = await db.athletes.find_one({"id": athlete_id, "team_id": team["id"]})
+    if a and a.get("photo_path"):
+        try:
+            (UPLOAD_DIR / a["photo_path"]).unlink(missing_ok=True)
+        except Exception:
+            pass
     await db.athletes.delete_one({"id": athlete_id, "team_id": team["id"]})
     await db.sessions.delete_many({"athlete_id": athlete_id})
+    await db.injuries.delete_many({"athlete_id": athlete_id})
     return {"ok": True}
+
+
+@api.post("/athletes/{athlete_id}/photo")
+async def upload_photo(athlete_id: str, file: UploadFile = File(...), user=Depends(get_current_user)):
+    team = await _get_team_or_404(user)
+    athlete = await db.athletes.find_one({"id": athlete_id, "team_id": team["id"]})
+    if not athlete:
+        raise HTTPException(404, "Atleta não encontrado")
+    ext = (file.filename.rsplit(".", 1)[-1] or "").lower() if file.filename else ""
+    if ext not in ALLOWED_IMG_EXT:
+        raise HTTPException(400, "Formato inválido. Use JPG, PNG ou WebP")
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(400, "Imagem demasiado grande (máx 5MB)")
+
+    # remove old photo
+    if athlete.get("photo_path"):
+        try:
+            (UPLOAD_DIR / athlete["photo_path"]).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    filename = f"{athlete_id}_{uuid.uuid4().hex[:8]}.{ext}"
+    (UPLOAD_DIR / filename).write_bytes(data)
+
+    await db.athletes.update_one(
+        {"id": athlete_id, "team_id": team["id"]},
+        {"$set": {"photo_path": filename, "photo_updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"ok": True, "photo_path": filename, "url": f"/api/athletes/{athlete_id}/photo"}
+
+
+@api.delete("/athletes/{athlete_id}/photo")
+async def remove_photo(athlete_id: str, user=Depends(get_current_user)):
+    team = await _get_team_or_404(user)
+    athlete = await db.athletes.find_one({"id": athlete_id, "team_id": team["id"]})
+    if not athlete:
+        raise HTTPException(404, "Atleta não encontrado")
+    if athlete.get("photo_path"):
+        try:
+            (UPLOAD_DIR / athlete["photo_path"]).unlink(missing_ok=True)
+        except Exception:
+            pass
+    await db.athletes.update_one(
+        {"id": athlete_id, "team_id": team["id"]},
+        {"$set": {"photo_path": None}},
+    )
+    return {"ok": True}
+
+
+@api.get("/athletes/{athlete_id}/photo")
+async def get_photo(athlete_id: str):
+    """Public photo endpoint (no auth) so <img src> works directly."""
+    athlete = await db.athletes.find_one({"id": athlete_id})
+    if not athlete or not athlete.get("photo_path"):
+        raise HTTPException(404, "Sem foto")
+    fp = UPLOAD_DIR / athlete["photo_path"]
+    if not fp.exists():
+        raise HTTPException(404, "Ficheiro não encontrado")
+    ext = athlete["photo_path"].rsplit(".", 1)[-1].lower()
+    mt = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
+    return FileResponse(fp, media_type=mt)
 
 
 # ---------------------- Sessions ----------------------
@@ -360,19 +435,99 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None)
 
     sufficient = days_since_first >= 28
 
-    # risk classification
+    # ---- Classify each metric by user-defined thresholds ----
+    # Monotonia
+    if monotony == 0:
+        mono_zone = "no_data"
+    elif monotony < 1.0:
+        mono_zone = "high_variation"      # boa
+    elif monotony <= 1.5:
+        mono_zone = "ideal"
+    elif monotony <= 2.0:
+        mono_zone = "moderate_high"
+    else:
+        mono_zone = "critical"
+
+    # Strain
+    if strain == 0:
+        strain_zone = "no_data"
+    elif strain < 1500:
+        strain_zone = "low"
+    elif strain <= 3000:
+        strain_zone = "moderate"
+    elif strain <= 6000:
+        strain_zone = "elevated"
+    else:
+        strain_zone = "extreme"
+
+    # ACWR
+    if acwr == 0:
+        acwr_zone = "no_data"
+    elif acwr < 0.8:
+        acwr_zone = "detraining"
+    elif acwr <= 1.3:
+        acwr_zone = "sweet_spot"
+    elif acwr < 1.5:
+        acwr_zone = "alert"
+    else:
+        acwr_zone = "high_risk"
+
+    # ---- Risk classification (combined ACWR + Monotonia + Strain) ----
+    risk_reasons = []
     if not sufficient:
         risk = "insufficient"
     elif acwr == 0:
         risk = "low"
-    elif acwr < 0.8:
-        risk = "warning"  # undertraining
-    elif acwr <= 1.3:
-        risk = "safe"
-    elif acwr <= 1.5:
-        risk = "warning"
+        risk_reasons.append("Sem treinos recentes")
     else:
-        risk = "danger"
+        base = "safe"
+
+        # ACWR contribution
+        if acwr_zone == "detraining":
+            base = "warning"
+            risk_reasons.append("Sub-treinamento — ACWR abaixo de 0.8 (zona de destreinamento)")
+        elif acwr_zone == "sweet_spot":
+            pass
+        elif acwr_zone == "alert":
+            if base == "safe":
+                base = "warning"
+            risk_reasons.append("Carga elevada — ACWR entre 1.3 e 1.5 (zona de alerta)")
+        elif acwr_zone == "high_risk":
+            base = "danger"
+            risk_reasons.append("Risco de lesão — ACWR ≥ 1.5 (zona de alto risco)")
+
+        # Monotonia contribution
+        if mono_zone == "critical":
+            risk_reasons.append("Monotonia crítica (>2.0) — treinos sem variação, risco de overtraining")
+            base = "danger"
+        elif mono_zone == "moderate_high":
+            risk_reasons.append("Monotonia moderada-alta (1.5–2.0) — pouca variação")
+            if base == "safe":
+                base = "warning"
+
+        # Strain contribution
+        if strain_zone == "extreme":
+            risk_reasons.append("Strain extremo (>6000) — risco de lesão, queda de desempenho")
+            base = "danger"
+        elif strain_zone == "elevated":
+            risk_reasons.append("Strain elevado (3000–6000) — monitorizar de perto")
+            if base == "safe":
+                base = "warning"
+
+        risk = base
+
+    risk_label_map = {
+        "safe": "Ótimo",
+        "warning": "Atenção",
+        "danger": "Risco Elevado",
+        "low": "Baixa Carga",
+        "insufficient": "Dados Insuficientes",
+        "no_data": "Sem Dados",
+    }
+    if not risk_reasons:
+        risk_description = "Carga, monotonia e strain em zonas seguras" if risk == "safe" else risk_label_map.get(risk, "")
+    else:
+        risk_description = " · ".join(risk_reasons)
 
     avg_load = round(sum(s["load"] for s in sessions) / len(sessions), 1)
     avg_sleep = round(sum(s["sleep_quality"] for s in sessions) / len(sessions), 1)
@@ -381,9 +536,15 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None)
         "acute": round(acute, 1),
         "chronic": round(chronic, 1),
         "acwr": acwr,
+        "acwr_zone": acwr_zone,
         "monotony": monotony,
+        "monotony_zone": mono_zone,
         "strain": strain,
+        "strain_zone": strain_zone,
         "risk": risk,
+        "risk_label": risk_label_map.get(risk, ""),
+        "risk_description": risk_description,
+        "risk_reasons": risk_reasons,
         "days_since_first": days_since_first,
         "sufficient_data": sufficient,
         "total_sessions": len(sessions),
@@ -746,13 +907,46 @@ async def seed_demo(user=Depends(get_current_user)):
 
 @api.delete("/seed/demo")
 async def clear_data(user=Depends(get_current_user)):
+    """Delete current user's team + athletes + sessions + injuries + photos."""
     team = await db.teams.find_one({"user_id": user["id"]})
     if team:
+        # delete athlete photos
+        async for a in db.athletes.find({"team_id": team["id"]}):
+            if a.get("photo_path"):
+                try:
+                    (UPLOAD_DIR / a["photo_path"]).unlink(missing_ok=True)
+                except Exception:
+                    pass
         await db.sessions.delete_many({"team_id": team["id"]})
         await db.athletes.delete_many({"team_id": team["id"]})
         await db.injuries.delete_many({"team_id": team["id"]})
         await db.teams.delete_one({"id": team["id"]})
     return {"ok": True}
+
+
+@api.post("/reset-all")
+async def reset_all(user=Depends(get_current_user)):
+    """Same as clear_data but explicit endpoint name for the 'reset total' button."""
+    team = await db.teams.find_one({"user_id": user["id"]})
+    counts = {"team": 0, "athletes": 0, "sessions": 0, "injuries": 0}
+    if team:
+        async for a in db.athletes.find({"team_id": team["id"]}):
+            if a.get("photo_path"):
+                try:
+                    (UPLOAD_DIR / a["photo_path"]).unlink(missing_ok=True)
+                except Exception:
+                    pass
+        r1 = await db.sessions.delete_many({"team_id": team["id"]})
+        r2 = await db.athletes.delete_many({"team_id": team["id"]})
+        r3 = await db.injuries.delete_many({"team_id": team["id"]})
+        await db.teams.delete_one({"id": team["id"]})
+        counts = {
+            "team": 1,
+            "athletes": r2.deleted_count,
+            "sessions": r1.deleted_count,
+            "injuries": r3.deleted_count,
+        }
+    return {"ok": True, "deleted": counts}
 
 
 # ---------------------- Startup ----------------------

@@ -3,6 +3,7 @@ import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import { Plus, Trash2 } from "lucide-react";
+import PlayerAvatar from "@/components/PlayerAvatar";
 
 export default function Athletes() {
   const [list, setList] = useState([]);
@@ -100,10 +101,13 @@ export default function Athletes() {
           {list.map((a) => (
             <div key={a.id} className="fld-card fld-card-hover relative" data-testid={`athlete-card-${a.id}`}>
               <div className="flex items-start justify-between mb-3">
-                <div className="metric-num text-[#CCFF00] text-3xl">{a.jersey_number ? `#${a.jersey_number}` : "—"}</div>
-                <button onClick={() => remove(a.id)} className="text-[#525252] hover:text-[#FF3B30]" data-testid={`delete-athlete-${a.id}`}>
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <PlayerAvatar athlete={a} size={56} editable onChange={load} />
+                <div className="flex items-center gap-3">
+                  <div className="metric-num text-[#CCFF00] text-3xl">{a.jersey_number ? `#${a.jersey_number}` : "—"}</div>
+                  <button onClick={() => remove(a.id)} className="text-[#525252] hover:text-[#FF3B30]" data-testid={`delete-athlete-${a.id}`}>
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
               <Link to={`/atletas/${a.id}`} className="block">
                 <div className="font-head text-xl font-bold mb-1 hover:text-[#CCFF00] transition-colors">{a.name}</div>
