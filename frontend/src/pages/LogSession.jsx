@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
+import { SESSION_TYPES, SESSION_TYPE_ORDER } from "@/components/Bits";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -9,6 +10,7 @@ export default function LogSession() {
   const [form, setForm] = useState({
     athlete_id: "",
     date: todayISO(),
+    session_type: "training",
     rpe: 5,
     duration_min: 75,
     sleep_quality: 4,
@@ -38,6 +40,7 @@ export default function LogSession() {
         duration_min: Number(form.duration_min),
         sleep_quality: Number(form.sleep_quality),
         wellness: Number(form.wellness),
+        session_type: form.session_type,
       });
       toast.success(`Sessão registada — Carga ${form.rpe * form.duration_min} UA`);
       setForm((f) => ({ ...f, notes: "" }));
@@ -73,6 +76,32 @@ export default function LogSession() {
             <div>
               <label className="fld-label">Data</label>
               <input className="fld-input" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required data-testid="session-date" />
+            </div>
+          </div>
+
+          <div>
+            <label className="fld-label">Tipo de Sessão</label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {SESSION_TYPE_ORDER.map((k) => {
+                const meta = SESSION_TYPES[k];
+                const active = form.session_type === k;
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setForm({ ...form, session_type: k })}
+                    data-testid={`session-type-${k}`}
+                    className="py-3 font-head tracking-widest text-sm uppercase border transition-all"
+                    style={{
+                      background: active ? meta.color : "transparent",
+                      color: active ? "#000" : meta.color,
+                      borderColor: active ? meta.color : `${meta.color}50`,
+                    }}
+                  >
+                    {meta.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

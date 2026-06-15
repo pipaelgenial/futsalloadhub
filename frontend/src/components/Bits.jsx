@@ -66,6 +66,33 @@ export function MetricCard({ label, value, unit, accent = false, testid, zoneCol
   );
 }
 
+export const SESSION_TYPES = {
+  training: { label: "Treino", short: "T", color: "#CCFF00", emoji: "" },
+  match: { label: "Jogo", short: "J", color: "#FF3B30", emoji: "" },
+  gym: { label: "Ginásio", short: "G", color: "#FFEA00", emoji: "" },
+  recovery: { label: "Recuperação", short: "R", color: "#00B0FF", emoji: "" },
+};
+
+export const SESSION_TYPE_ORDER = ["training", "match", "gym", "recovery"];
+
+export function SessionTypeBadge({ type, size = "md", testid }) {
+  const meta = SESSION_TYPES[type] || SESSION_TYPES.training;
+  const sizeCls = size === "sm" ? "text-[10px] px-1.5 py-0.5" : "text-xs px-2 py-1";
+  return (
+    <span
+      data-testid={testid}
+      className={`font-head uppercase tracking-widest inline-block ${sizeCls}`}
+      style={{
+        color: meta.color,
+        background: `${meta.color}15`,
+        border: `1px solid ${meta.color}50`,
+      }}
+    >
+      {meta.label}
+    </span>
+  );
+}
+
 export const MONOTONY_ZONES = {
   high_variation: { label: "Boa variação", color: "#00E676", message: "Boa variação entre sessões — adaptação física favorecida." },
   ideal: { label: "Ideal", color: "#00E676", message: "Monotonia em zona ideal (1.0–1.5) — cargas bem distribuídas." },

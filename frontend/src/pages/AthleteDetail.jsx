@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
-import { RiskBadge, MetricCard, zoneColor } from "@/components/Bits";
+import { RiskBadge, MetricCard, zoneColor, SESSION_TYPES, SESSION_TYPE_ORDER, SessionTypeBadge } from "@/components/Bits";
 import InjuriesPanel from "@/components/InjuriesPanel";
 import PlayerAvatar from "@/components/PlayerAvatar";
 import { ArrowLeft, Trash2, ShieldAlert, Pencil, X, Check } from "lucide-react";
@@ -42,6 +42,7 @@ export default function AthleteDetail() {
       duration_min: s.duration_min,
       sleep_quality: s.sleep_quality,
       wellness: s.wellness ?? 7,
+      session_type: s.session_type || "training",
       notes: s.notes || "",
     });
   }
@@ -57,6 +58,7 @@ export default function AthleteDetail() {
         duration_min: Number(editForm.duration_min),
         sleep_quality: Number(editForm.sleep_quality),
         wellness: Number(editForm.wellness),
+        session_type: editForm.session_type,
         notes: editForm.notes || null,
       });
       toast.success("Sessão atualizada");
@@ -215,6 +217,7 @@ export default function AthleteDetail() {
               <thead>
                 <tr className="text-left text-xs uppercase tracking-widest text-[#525252] border-b border-white/5">
                   <th className="py-3 pr-4">Data</th>
+                  <th className="py-3 px-2">Tipo</th>
                   <th className="py-3 px-2">RPE</th>
                   <th className="py-3 px-2">Duração</th>
                   <th className="py-3 px-2">Sono</th>
@@ -233,6 +236,13 @@ export default function AthleteDetail() {
                       <tr key={s.id} className="border-b border-white/5 bg-white/[0.02]" data-testid={`edit-row-${s.id}`}>
                         <td className="py-2 pr-4">
                           <input type="date" className="fld-input py-1 px-2 text-sm" value={editForm.date} onChange={(e) => setEditForm({ ...editForm, date: e.target.value })} data-testid={`edit-date-${s.id}`} />
+                        </td>
+                        <td className="py-2 px-2">
+                          <select className="fld-input py-1 px-2 text-sm" value={editForm.session_type} onChange={(e) => setEditForm({ ...editForm, session_type: e.target.value })} data-testid={`edit-type-${s.id}`}>
+                            {SESSION_TYPE_ORDER.map((k) => (
+                              <option key={k} value={k}>{SESSION_TYPES[k].label}</option>
+                            ))}
+                          </select>
                         </td>
                         <td className="py-2 px-2">
                           <input type="number" min="1" max="10" className="fld-input py-1 px-2 w-16 text-sm metric-num" value={editForm.rpe} onChange={(e) => setEditForm({ ...editForm, rpe: e.target.value })} data-testid={`edit-rpe-${s.id}`} />
@@ -263,6 +273,7 @@ export default function AthleteDetail() {
                   return (
                     <tr key={s.id} className="border-b border-white/5" data-testid={`session-row-${s.id}`}>
                       <td className="py-2 pr-4">{s.date}</td>
+                      <td className="py-2 px-2"><SessionTypeBadge type={s.session_type || "training"} size="sm" /></td>
                       <td className="py-2 px-2 metric-num">{s.rpe}</td>
                       <td className="py-2 px-2">{s.duration_min}min</td>
                       <td className="py-2 px-2">{s.sleep_quality}/5</td>

@@ -126,6 +126,7 @@ class SessionIn(BaseModel):
     duration_min: int = Field(ge=1, le=300)
     sleep_quality: int = Field(ge=1, le=5)
     wellness: int = Field(ge=1, le=10, default=7)  # bem-estar corporal 1-10
+    session_type: str = Field(default="training")  # training|match|gym|recovery
     notes: Optional[str] = None
 
 
@@ -135,7 +136,11 @@ class SessionUpdate(BaseModel):
     duration_min: Optional[int] = Field(default=None, ge=1, le=300)
     sleep_quality: Optional[int] = Field(default=None, ge=1, le=5)
     wellness: Optional[int] = Field(default=None, ge=1, le=10)
+    session_type: Optional[str] = None
     notes: Optional[str] = None
+
+
+VALID_SESSION_TYPES = {"training", "match", "gym", "recovery"}
 
 
 class InjuryIn(BaseModel):
@@ -356,6 +361,8 @@ async def create_session(data: SessionIn, user=Depends(get_current_user)):
     athlete = await db.athletes.find_one({"id": data.athlete_id, "team_id": team["id"]})
     if not athlete:
         raise HTTPException(404, "Atleta não encontrado")
+    if data.session_type not in VALID_SESSION_TYPES:
+        raise HTTPException(400, "Tipo de sessão inválido")
     session_id = str(uuid.uuid4())
     load = data.rpe * data.duration_min
     doc = {
@@ -367,6 +374,7 @@ async def create_session(data: SessionIn, user=Depends(get_current_user)):
         "duration_min": data.duration_min,
         "sleep_quality": data.sleep_quality,
         "wellness": data.wellness,
+        "session_type": data.session_type,
         "load": load,
         "notes": data.notes,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -393,6 +401,10 @@ async def update_session(session_id: str, data: SessionUpdate, user=Depends(get_
         updates["sleep_quality"] = data.sleep_quality
     if data.wellness is not None:
         updates["wellness"] = data.wellness
+    if data.session_type is not None:
+        if data.session_type not in VALID_SESSION_TYPES:
+            raise HTTPException(400, "Tipo de sessão inválido")
+        updates["session_type"] = data.session_type
     if data.notes is not None:
         updates["notes"] = data.notes
     # recompute load if rpe or duration changed
@@ -1104,14 +1116,20 @@ async def calendar_view(start: str, days: int = 28, user=Depends(get_current_use
                 "rpe": s["rpe"],
                 "duration_min": s["duration_min"],
                 "load": s["load"],
+                "session_type": s.get("session_type", "training"),
                 "session_id": s["id"],
             })
+        # session type counts for day badge display
+        type_counts = defaultdict(int)
+        for s in rec:
+            type_counts[s.get("session_type", "training")] += 1
         out_days.append({
             "date": d,
             "weekday": (start_d + timedelta(days=i)).weekday(),
             "total_load": round(total_load, 1),
             "athletes_count": len(rec),
             "athletes": athletes_trained,
+            "session_types": dict(type_counts),
             "planned": plan,
         })
 
@@ -1431,22 +1449,38 @@ async def seed_demo(user=Depends(get_current_user)):
     for aid, _ in athlete_ids:
         for i in range(45, 0, -1):
             d = today - timedelta(days=i)
-            # train Mon/Tue/Thu/Fri (weekdays 0,1,3,4) + match Sat
+            # train Mon/Tue/Thu/Fri (weekdays 0,1,3,4) + match Sat (5) + recovery Sun (6)
             wd = d.weekday()
-            train = wd in (0, 1, 3, 4, 5)
+            train = wd in (0, 1, 3, 4, 5, 6)
             if not train:
                 continue
             if random.random() < 0.15:
                 continue  # absence
-            base_rpe = 6 if wd == 5 else 5
-            rpe = max(1, min(10, base_rpe + random.randint(-2, 3)))
-            duration = 90 if wd == 5 else random.choice([60, 75, 90])
+            if wd == 6:
+                # recovery — low intensity
+                rpe = random.randint(2, 4)
+                duration = random.choice([30, 45, 60])
+            elif wd == 5:
+                rpe = max(1, min(10, 6 + random.randint(-2, 3)))
+                duration = 90
+            else:
+                rpe = max(1, min(10, 5 + random.randint(-2, 3)))
+                duration = random.choice([60, 75, 90])
             # spike injection on day 7 to demo high risk
-            if i in (5, 6, 7) and random.random() < 0.4:
+            if i in (5, 6, 7) and random.random() < 0.4 and wd != 6:
                 rpe = min(10, rpe + 2)
                 duration += 20
             sleep = random.randint(2, 5)
             wellness = random.randint(4, 9)
+            # session type mapping by weekday: Sat=match, Tue=gym, Sun=recovery, others=training
+            if wd == 5:
+                stype = "match"
+            elif wd == 1:
+                stype = "gym"
+            elif wd == 6:
+                stype = "recovery"
+            else:
+                stype = "training"
             sessions_to_insert.append({
                 "id": str(uuid.uuid4()),
                 "athlete_id": aid,
@@ -1456,6 +1490,7 @@ async def seed_demo(user=Depends(get_current_user)):
                 "duration_min": duration,
                 "sleep_quality": sleep,
                 "wellness": wellness,
+                "session_type": stype,
                 "load": rpe * duration,
                 "notes": None,
                 "created_at": datetime.now(timezone.utc).isoformat(),

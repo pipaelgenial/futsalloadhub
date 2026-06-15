@@ -233,11 +233,47 @@ export default function Dashboard() {
             {/* Detail metrics summary line */}
             {detailMetrics && (
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5 text-sm" data-testid="detail-metrics-row">
-                <div><div className="fld-label">Aguda</div><div className="metric-num text-2xl">{detailMetrics.acute} <span className="text-xs text-[#A3A3A3]">UA</span></div></div>
-                <div><div className="fld-label">Crónica</div><div className="metric-num text-2xl">{detailMetrics.chronic} <span className="text-xs text-[#A3A3A3]">UA</span></div></div>
-                <div><div className="fld-label">ACWR</div><div className="metric-num text-2xl text-[#CCFF00]">{detailMetrics.sufficient_data ? detailMetrics.acwr : "—"}</div></div>
-                <div><div className="fld-label">Monotonia</div><div className="metric-num text-2xl">{detailMetrics.monotony || "—"}</div></div>
-                <div><div className="fld-label">Strain</div><div className="metric-num text-2xl">{detailMetrics.strain || "—"}</div></div>
+                <div>
+                  <div className="fld-label">Aguda</div>
+                  <div className="metric-num text-2xl">{detailMetrics.acute} <span className="text-xs text-[#A3A3A3]">UA</span></div>
+                </div>
+                <div>
+                  <div className="fld-label">Crónica</div>
+                  <div className="metric-num text-2xl">{detailMetrics.chronic} <span className="text-xs text-[#A3A3A3]">UA</span></div>
+                </div>
+                <div className="relative pl-3" style={{ borderLeft: `3px solid ${detailMetrics.sufficient_data ? (detailMetrics.acwr_zone === "sweet_spot" ? "#00E676" : detailMetrics.acwr_zone === "detraining" || detailMetrics.acwr_zone === "alert" ? "#FFEA00" : detailMetrics.acwr_zone === "high_risk" ? "#FF3B30" : "#525252") : "#525252"}` }} data-testid="detail-acwr">
+                  <div className="fld-label">ACWR</div>
+                  <div className="metric-num text-2xl" style={{ color: detailMetrics.sufficient_data ? (detailMetrics.acwr_zone === "sweet_spot" ? "#00E676" : detailMetrics.acwr_zone === "high_risk" ? "#FF3B30" : "#CCFF00") : "#525252" }}>
+                    {detailMetrics.sufficient_data ? detailMetrics.acwr : "—"}
+                  </div>
+                  {detailMetrics.sufficient_data && (
+                    <div className="text-[10px] uppercase tracking-widest mt-0.5" style={{ color: detailMetrics.acwr_zone === "sweet_spot" ? "#00E676" : detailMetrics.acwr_zone === "high_risk" ? "#FF3B30" : "#FFEA00" }}>
+                      {detailMetrics.acwr_zone === "sweet_spot" ? "Zona Ótima" : detailMetrics.acwr_zone === "detraining" ? "Destreinamento" : detailMetrics.acwr_zone === "alert" ? "Alerta" : detailMetrics.acwr_zone === "high_risk" ? "Alto Risco" : ""}
+                    </div>
+                  )}
+                </div>
+                <div className="relative pl-3" style={{ borderLeft: `3px solid ${detailMetrics.monotony ? (detailMetrics.monotony_zone === "ideal" || detailMetrics.monotony_zone === "high_variation" ? "#00E676" : detailMetrics.monotony_zone === "moderate_high" ? "#FFEA00" : detailMetrics.monotony_zone === "critical" ? "#FF3B30" : "#525252") : "#525252"}` }} data-testid="detail-monotony">
+                  <div className="fld-label">Monotonia</div>
+                  <div className="metric-num text-2xl" style={{ color: detailMetrics.monotony ? (detailMetrics.monotony_zone === "ideal" || detailMetrics.monotony_zone === "high_variation" ? "#00E676" : detailMetrics.monotony_zone === "moderate_high" ? "#FFEA00" : detailMetrics.monotony_zone === "critical" ? "#FF3B30" : "#fff") : "#525252" }}>
+                    {detailMetrics.monotony || "—"}
+                  </div>
+                  {detailMetrics.monotony > 0 && (
+                    <div className="text-[10px] uppercase tracking-widest mt-0.5" style={{ color: detailMetrics.monotony_zone === "ideal" || detailMetrics.monotony_zone === "high_variation" ? "#00E676" : detailMetrics.monotony_zone === "moderate_high" ? "#FFEA00" : "#FF3B30" }}>
+                      {detailMetrics.monotony_zone === "ideal" ? "Ideal" : detailMetrics.monotony_zone === "high_variation" ? "Boa Variação" : detailMetrics.monotony_zone === "moderate_high" ? "Mod-Alta" : detailMetrics.monotony_zone === "critical" ? "Crítica" : ""}
+                    </div>
+                  )}
+                </div>
+                <div className="relative pl-3" style={{ borderLeft: `3px solid ${detailMetrics.strain ? (detailMetrics.strain_zone === "moderate" ? "#00E676" : detailMetrics.strain_zone === "elevated" ? "#FFEA00" : detailMetrics.strain_zone === "extreme" ? "#FF3B30" : "#525252") : "#525252"}` }} data-testid="detail-strain">
+                  <div className="fld-label">Strain</div>
+                  <div className="metric-num text-2xl" style={{ color: detailMetrics.strain ? (detailMetrics.strain_zone === "moderate" ? "#00E676" : detailMetrics.strain_zone === "elevated" ? "#FFEA00" : detailMetrics.strain_zone === "extreme" ? "#FF3B30" : "#fff") : "#525252" }}>
+                    {detailMetrics.strain || "—"}
+                  </div>
+                  {detailMetrics.strain > 0 && (
+                    <div className="text-[10px] uppercase tracking-widest mt-0.5" style={{ color: detailMetrics.strain_zone === "moderate" ? "#00E676" : detailMetrics.strain_zone === "elevated" ? "#FFEA00" : detailMetrics.strain_zone === "extreme" ? "#FF3B30" : "#A3A3A3" }}>
+                      {detailMetrics.strain_zone === "low" ? "Baixo" : detailMetrics.strain_zone === "moderate" ? "Moderado" : detailMetrics.strain_zone === "elevated" ? "Elevado" : detailMetrics.strain_zone === "extreme" ? "Extremo" : ""}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

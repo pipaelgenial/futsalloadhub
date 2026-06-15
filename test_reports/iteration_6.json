@@ -1,0 +1,61 @@
+{
+  "summary": "Phase 6 testing complete. Backend 12/12 pass: POST /api/sessions accepts session_type and defaults to 'training' when omitted; all 4 valid types accepted; invalid types (e.g. 'yoga') return 400 with detail 'Tipo de sessão inválido'; PUT /api/sessions/{id} updates session_type and validates invalid values with 400; GET /api/calendar?start=&days=28 returns session_types map on every day plus session_type on each athlete entry, all 4 types observed; seed creates weekday-mapped distribution where Sat=match dominates, Tue=gym dominates, Sun=recovery dominates, others=training dominate. Frontend verified end-to-end: Dashboard 'Vista Detalhada' detail-metrics-row has detail-acwr (green border #00E676 'Zona Ótima'), detail-monotony (yellow border #FFEA00 '1.54 Mod-Alta'), detail-strain (yellow border #FFEA00 '3131.01 Elevado'); LogSession shows the 4 Tipo de Sessão buttons (session-type-{training,match,gym,recovery}) all clickable; Calendar has NO PLANEAR button, NO 'Planeados' card, and instead shows 'Distribuição por Tipo' card with counts per type plus day-cell type badges + type legend; AthleteDetail sessions table now has 'Tipo' column with colored SessionTypeBadge for all 4 types and Pencil edit reveals edit-type-{id} <select> with options [training, match, gym, recovery].",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard / WeeklySummary", "issues": ["Recharts width(-1)/height(-1) console warnings on initial mount and selector changes — cosmetic, carried over from iterations 4 and 5."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase6_features.py",
+    "/app/test_reports/pytest/phase6_results.xml"
+  ],
+  "action_items": [
+    "Minor (carried over): fix Recharts width(-1)/height(-1) warnings on Dashboard + WeeklySummary by giving ResponsiveContainer a fixed minHeight/minWidth or guarding render until data is ready.",
+    "Code-org (carried over from iter 3-5): server.py is now 1651 lines (was 1615 in iter 5). Strongly recommend extracting routers (analytics_weekly.py, sessions.py, photos.py, calendar.py) before next feature phase. Hard guideline is 700 lines.",
+    "Backend still exposes /api/planned-sessions endpoints though the frontend no longer uses them. Consider either removing dead endpoints or documenting them as planned-for-future."
+  ],
+  "critical_code_review_comments": [
+    "VALID_SESSION_TYPES is duplicated in concept across SessionIn default ('training'), validation set, and the frontend SESSION_TYPES map in Bits.jsx. Consider exposing the valid set via a /api/meta endpoint or sharing via a constant generated at build time so coaches cannot drift.",
+    "POST /api/sessions validates session_type AFTER athlete lookup, which is fine, but the same validation is open-coded in PUT. Extract to a helper like `_validate_session_type(value)` to keep both endpoints DRY.",
+    "Dashboard.jsx Vista Detalhada uses long inline ternaries to compute colors per zone (lines 244/255/266). Extract to a small helper (e.g. zoneCellColor(metric, zone)) — the same map already exists in Bits.jsx (zoneColor) and could be reused.",
+    "Calendar.jsx still receives 'planned' arrays from the backend on each day but never renders them. Either trim the response payload (dead field over the wire) or stop fetching planned sessions to reduce response size on /api/calendar.",
+    "server.py is 1651 lines, ~2.4× the 700-line guideline — modular split is overdue and explicitly recommended every prior iteration."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase6_features.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 phase6 tests)",
+    "frontend": "100% on Phase 6 flows (Dashboard zones, LogSession types, Calendar planning removal + dist card, AthleteDetail Tipo column + edit dropdown)"
+  },
+  "test_credentials": "treinador@futsal.pt / treinador123 (verified)",
+  "seed_data_creation": "Re-seeded /api/seed/demo via session fixture; verified weekday distribution (Sat=match, Tue=gym, Sun=recovery, others=training).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 6 verified end-to-end. Backend tests in /app/backend/tests/test_phase6_features.py (12 tests, module-scoped fixture re-seeds demo, uses /api/sessions?athlete_id=... for listing). Frontend Playwright confirmed: Dashboard detail-metrics-row shows colored borders (green/yellow/red) and zone labels per zone for ACWR/Monotonia/Strain; LogSession has 4 session-type-* buttons; Calendar no longer has PLANEAR button or Planeados card — instead shows 'Distribuição por Tipo' card + colored day-cell badges (Treino green, Jogo red, Ginásio yellow, Recuperação blue) + legend; AthleteDetail sessions table headers are 'Data | Tipo | RPE | Duração | Sono | Bem-Estar | Carga | Ações' with SessionTypeBadge in Tipo column, 30 edit-session-* buttons, and edit-type-{id} is a native <select> with options [training, match, gym, recovery]. Note: /api/planned-sessions endpoints remain on the backend but are no longer consumed by the UI.",
+  "tested_features": {
+    "backend_session_type_create_valid": "PASS — explicit 'match' persists and surfaces via GET /api/sessions; all 4 types accepted.",
+    "backend_session_type_default_training": "PASS — omitting session_type yields 'training'.",
+    "backend_session_type_create_invalid_400": "PASS — POST with session_type='yoga' returns 400 'Tipo de sessão inválido'.",
+    "backend_session_type_update_valid": "PASS — PUT changes 'training'→'gym' and persists.",
+    "backend_session_type_update_invalid_400": "PASS — PUT with session_type='stretching' returns 400 'Tipo de sessão inválido'.",
+    "backend_calendar_session_types_map": "PASS — every day has session_types dict and each athlete entry has session_type ∈ {training, match, gym, recovery}.",
+    "backend_calendar_all_4_types_present": "PASS — over a 28-day window all 4 types appear.",
+    "backend_seed_weekday_distribution": "PASS — Sat=match, Tue=gym, Sun=recovery, others=training dominate their weekdays.",
+    "frontend_dashboard_vista_detalhada_colored_zones": "PASS — detail-acwr green/ZonaÓtima, detail-monotony yellow/Mod-Alta(1.54), detail-strain yellow/Elevado(3131.01).",
+    "frontend_logsession_type_buttons": "PASS — session-type-{training,match,gym,recovery} all visible and clickable.",
+    "frontend_calendar_no_planear_button": "PASS — PLANEAR button absent.",
+    "frontend_calendar_no_planeados_card": "PASS — 'Planeados' summary card absent.",
+    "frontend_calendar_distribuicao_card": "PASS — 'Distribuição por Tipo' card with TREINO/JOGO/GINÁSIO/RECUPERAÇÃO counts.",
+    "frontend_calendar_day_cell_type_badges": "PASS — day cells show colored session-type badges at bottom + legend bar at the table footer.",
+    "frontend_athletedetail_tipo_column": "PASS — table header 'Data Tipo RPE Duração Sono Bem-Estar Carga Ações' with SessionTypeBadge per row.",
+    "frontend_athletedetail_edit_type_dropdown": "PASS — Pencil edit reveals a <select data-testid='edit-type-{id}'> with options [training, match, gym, recovery]."
+  },
+  "rca_of_the_issue": "No bugs found in Phase 6. The only carryover is the cosmetic Recharts width(-1)/height(-1) console warnings noted since iteration 4."
+}
