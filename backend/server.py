@@ -1,89 +1,803 @@
-from fastapi import FastAPI, APIRouter
 from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
-import logging
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
-import uuid
-from datetime import datetime, timezone
-
-
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
+import os
+import logging
+import uuid
+import bcrypt
+import jwt
+import math
+import random
+from typing import List, Optional, Annotated
+from datetime import datetime, timezone, timedelta, date
+from collections import defaultdict
+
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends
+from starlette.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
+
+# MongoDB
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Create the main app without a prefix
 app = FastAPI()
+api = APIRouter(prefix="/api")
 
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
+JWT_ALGO = "HS256"
+JWT_SECRET = os.environ["JWT_SECRET"]
 
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+# ---------------------- Helpers ----------------------
+def hash_password(p: str) -> str:
+    return bcrypt.hashpw(p.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
-async def root():
-    return {"message": "Hello World"}
+def verify_password(plain: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
+def create_access_token(user_id: str, email: str) -> str:
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=24),
+        "type": "access",
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
 
-# Include the router in the main app
-app.include_router(api_router)
 
+async def get_current_user(request: Request) -> dict:
+    token = request.cookies.get("access_token")
+    if not token:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[7:]
+    if not token:
+        raise HTTPException(401, "Não autenticado")
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+        if payload.get("type") != "access":
+            raise HTTPException(401, "Tipo de token inválido")
+        user = await db.users.find_one({"id": payload["sub"]})
+        if not user:
+            raise HTTPException(401, "Utilizador não encontrado")
+        user.pop("_id", None)
+        user.pop("password_hash", None)
+        return user
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(401, "Sessão expirada")
+    except jwt.InvalidTokenError:
+        raise HTTPException(401, "Token inválido")
+
+
+def set_auth_cookie(response: Response, token: str):
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=86400,
+        path="/",
+    )
+
+
+# ---------------------- Models ----------------------
+class RegisterIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6)
+    name: str
+
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class TeamIn(BaseModel):
+    name: str
+    escalao: str
+    epoca: str
+
+
+class AthleteIn(BaseModel):
+    name: str
+    position: Optional[str] = None
+    jersey_number: Optional[int] = None
+    birth_date: Optional[str] = None
+
+
+class SessionIn(BaseModel):
+    athlete_id: str
+    date: str  # YYYY-MM-DD
+    rpe: int = Field(ge=1, le=10)
+    duration_min: int = Field(ge=1, le=300)
+    sleep_quality: int = Field(ge=1, le=5)
+    notes: Optional[str] = None
+
+
+class InjuryIn(BaseModel):
+    athlete_id: str
+    type: str
+    body_part: str
+    start_date: str  # YYYY-MM-DD
+    end_date: Optional[str] = None
+    severity: str = Field(default="medium")  # low|medium|high
+    notes: Optional[str] = None
+
+
+# ---------------------- Auth Routes ----------------------
+@api.post("/auth/register")
+async def register(data: RegisterIn, response: Response):
+    email = data.email.lower()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(400, "Email já registado")
+    user_id = str(uuid.uuid4())
+    doc = {
+        "id": user_id,
+        "email": email,
+        "password_hash": hash_password(data.password),
+        "name": data.name,
+        "role": "coach",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(doc)
+    token = create_access_token(user_id, email)
+    set_auth_cookie(response, token)
+    return {"id": user_id, "email": email, "name": data.name, "role": "coach", "token": token}
+
+
+@api.post("/auth/login")
+async def login(data: LoginIn, response: Response):
+    email = data.email.lower()
+    user = await db.users.find_one({"email": email})
+    if not user or not verify_password(data.password, user["password_hash"]):
+        raise HTTPException(401, "Credenciais inválidas")
+    token = create_access_token(user["id"], email)
+    set_auth_cookie(response, token)
+    return {
+        "id": user["id"],
+        "email": email,
+        "name": user.get("name"),
+        "role": user.get("role", "coach"),
+        "token": token,
+    }
+
+
+@api.post("/auth/logout")
+async def logout(response: Response):
+    response.delete_cookie("access_token", path="/")
+    return {"ok": True}
+
+
+@api.get("/auth/me")
+async def me(user=Depends(get_current_user)):
+    return user
+
+
+# ---------------------- Team ----------------------
+@api.get("/team")
+async def get_team(user=Depends(get_current_user)):
+    team = await db.teams.find_one({"user_id": user["id"]}, {"_id": 0})
+    return team  # may be None
+
+
+@api.post("/team")
+async def upsert_team(data: TeamIn, user=Depends(get_current_user)):
+    existing = await db.teams.find_one({"user_id": user["id"]})
+    if existing:
+        await db.teams.update_one(
+            {"user_id": user["id"]},
+            {"$set": {"name": data.name, "escalao": data.escalao, "epoca": data.epoca}},
+        )
+        team = await db.teams.find_one({"user_id": user["id"]}, {"_id": 0})
+        return team
+    team_id = str(uuid.uuid4())
+    doc = {
+        "id": team_id,
+        "user_id": user["id"],
+        "name": data.name,
+        "escalao": data.escalao,
+        "epoca": data.epoca,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.teams.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+# ---------------------- Athletes ----------------------
+async def _get_team_or_404(user):
+    team = await db.teams.find_one({"user_id": user["id"]})
+    if not team:
+        raise HTTPException(400, "Insira dados da equipa primeiro")
+    return team
+
+
+@api.get("/athletes")
+async def list_athletes(user=Depends(get_current_user)):
+    team = await db.teams.find_one({"user_id": user["id"]})
+    if not team:
+        return []
+    athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).to_list(500)
+    return athletes
+
+
+@api.post("/athletes")
+async def create_athlete(data: AthleteIn, user=Depends(get_current_user)):
+    team = await _get_team_or_404(user)
+    athlete_id = str(uuid.uuid4())
+    doc = {
+        "id": athlete_id,
+        "team_id": team["id"],
+        "name": data.name,
+        "position": data.position,
+        "jersey_number": data.jersey_number,
+        "birth_date": data.birth_date,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.athletes.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.delete("/athletes/{athlete_id}")
+async def delete_athlete(athlete_id: str, user=Depends(get_current_user)):
+    team = await _get_team_or_404(user)
+    await db.athletes.delete_one({"id": athlete_id, "team_id": team["id"]})
+    await db.sessions.delete_many({"athlete_id": athlete_id})
+    return {"ok": True}
+
+
+# ---------------------- Sessions ----------------------
+@api.post("/sessions")
+async def create_session(data: SessionIn, user=Depends(get_current_user)):
+    team = await _get_team_or_404(user)
+    athlete = await db.athletes.find_one({"id": data.athlete_id, "team_id": team["id"]})
+    if not athlete:
+        raise HTTPException(404, "Atleta não encontrado")
+    session_id = str(uuid.uuid4())
+    load = data.rpe * data.duration_min
+    doc = {
+        "id": session_id,
+        "athlete_id": data.athlete_id,
+        "team_id": team["id"],
+        "date": data.date,
+        "rpe": data.rpe,
+        "duration_min": data.duration_min,
+        "sleep_quality": data.sleep_quality,
+        "load": load,
+        "notes": data.notes,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.sessions.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.get("/sessions")
+async def list_sessions(athlete_id: Optional[str] = None, user=Depends(get_current_user)):
+    team = await db.teams.find_one({"user_id": user["id"]})
+    if not team:
+        return []
+    q = {"team_id": team["id"]}
+    if athlete_id:
+        q["athlete_id"] = athlete_id
+    sessions = await db.sessions.find(q, {"_id": 0}).sort("date", -1).to_list(5000)
+    return sessions
+
+
+@api.delete("/sessions/{session_id}")
+async def delete_session(session_id: str, user=Depends(get_current_user)):
+    team = await _get_team_or_404(user)
+    await db.sessions.delete_one({"id": session_id, "team_id": team["id"]})
+    return {"ok": True}
+
+
+# ---------------------- Analytics ----------------------
+def _parse_date(s: str) -> date:
+    return datetime.strptime(s, "%Y-%m-%d").date()
+
+
+def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None) -> dict:
+    """Compute ACWR, acute, chronic, monotony, strain, risk for one athlete."""
+    if ref_date is None:
+        ref_date = date.today()
+
+    # group loads by day
+    by_day = defaultdict(float)
+    sleep_by_day = {}
+    dates_set = []
+    for s in sessions:
+        d = _parse_date(s["date"])
+        by_day[d] += s["load"]
+        sleep_by_day[d] = s["sleep_quality"]
+        dates_set.append(d)
+
+    if not dates_set:
+        return {
+            "acute": 0,
+            "chronic": 0,
+            "acwr": 0,
+            "monotony": 0,
+            "strain": 0,
+            "risk": "no_data",
+            "days_since_first": 0,
+            "sufficient_data": False,
+            "total_sessions": 0,
+            "avg_load": 0,
+            "avg_sleep": 0,
+        }
+
+    first_date = min(dates_set)
+    days_since_first = (ref_date - first_date).days
+
+    # acute: last 7 days
+    acute = sum(by_day.get(ref_date - timedelta(days=i), 0) for i in range(7))
+    # chronic: avg of weekly loads over last 28 days (4 weeks)
+    weekly_loads = []
+    for w in range(4):
+        s = sum(by_day.get(ref_date - timedelta(days=i), 0) for i in range(w * 7, (w + 1) * 7))
+        weekly_loads.append(s)
+    chronic = sum(weekly_loads) / 4 if weekly_loads else 0
+
+    acwr = round(acute / chronic, 2) if chronic > 0 else 0
+
+    # monotony & strain (last 7 days)
+    week_loads = [by_day.get(ref_date - timedelta(days=i), 0) for i in range(7)]
+    mean_l = sum(week_loads) / 7
+    var_l = sum((x - mean_l) ** 2 for x in week_loads) / 7
+    std_l = math.sqrt(var_l)
+    monotony = round(mean_l / std_l, 2) if std_l > 0 else 0
+    strain = round(sum(week_loads) * monotony, 2) if monotony else 0
+
+    sufficient = days_since_first >= 28
+
+    # risk classification
+    if not sufficient:
+        risk = "insufficient"
+    elif acwr == 0:
+        risk = "low"
+    elif acwr < 0.8:
+        risk = "warning"  # undertraining
+    elif acwr <= 1.3:
+        risk = "safe"
+    elif acwr <= 1.5:
+        risk = "warning"
+    else:
+        risk = "danger"
+
+    avg_load = round(sum(s["load"] for s in sessions) / len(sessions), 1)
+    avg_sleep = round(sum(s["sleep_quality"] for s in sessions) / len(sessions), 1)
+
+    return {
+        "acute": round(acute, 1),
+        "chronic": round(chronic, 1),
+        "acwr": acwr,
+        "monotony": monotony,
+        "strain": strain,
+        "risk": risk,
+        "days_since_first": days_since_first,
+        "sufficient_data": sufficient,
+        "total_sessions": len(sessions),
+        "avg_load": avg_load,
+        "avg_sleep": avg_sleep,
+        "first_date": first_date.isoformat(),
+    }
+
+
+@api.get("/analytics/athlete/{athlete_id}")
+async def analytics_athlete(athlete_id: str, user=Depends(get_current_user)):
+    team = await _get_team_or_404(user)
+    athlete = await db.athletes.find_one({"id": athlete_id, "team_id": team["id"]}, {"_id": 0})
+    if not athlete:
+        raise HTTPException(404, "Atleta não encontrado")
+    sessions = await db.sessions.find({"athlete_id": athlete_id}, {"_id": 0}).to_list(5000)
+    metrics = compute_metrics_for_athlete(sessions)
+
+    # daily time series for ACWR chart (last 60 days)
+    ref = date.today()
+    by_day = defaultdict(float)
+    for s in sessions:
+        by_day[_parse_date(s["date"])] += s["load"]
+
+    series = []
+    for i in range(59, -1, -1):
+        d = ref - timedelta(days=i)
+        acute = sum(by_day.get(d - timedelta(days=j), 0) for j in range(7))
+        weekly = []
+        for w in range(4):
+            ws = sum(by_day.get(d - timedelta(days=j), 0) for j in range(w * 7, (w + 1) * 7))
+            weekly.append(ws)
+        chronic = sum(weekly) / 4
+        acwr = round(acute / chronic, 2) if chronic > 0 else 0
+        series.append({
+            "date": d.isoformat(),
+            "load": round(by_day.get(d, 0), 1),
+            "acute": round(acute, 1),
+            "chronic": round(chronic, 1),
+            "acwr": acwr,
+        })
+
+    return {"athlete": athlete, "metrics": metrics, "series": series, "sessions": sessions}
+
+
+@api.get("/analytics/team")
+async def analytics_team(user=Depends(get_current_user)):
+    team = await db.teams.find_one({"user_id": user["id"]}, {"_id": 0})
+    if not team:
+        return {"team": None, "athletes": [], "summary": {}}
+    athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).to_list(500)
+    out_athletes = []
+    total_acute = 0
+    total_chronic = 0
+    counted = 0
+    risk_counts = {"safe": 0, "warning": 0, "danger": 0, "insufficient": 0, "low": 0, "no_data": 0}
+    for a in athletes:
+        sessions = await db.sessions.find({"athlete_id": a["id"]}, {"_id": 0}).to_list(5000)
+        m = compute_metrics_for_athlete(sessions)
+        out_athletes.append({**a, "metrics": m})
+        risk_counts[m["risk"]] = risk_counts.get(m["risk"], 0) + 1
+        if m["sufficient_data"]:
+            total_acute += m["acute"]
+            total_chronic += m["chronic"]
+            counted += 1
+
+    summary = {
+        "athletes_count": len(athletes),
+        "avg_acute": round(total_acute / counted, 1) if counted else 0,
+        "avg_chronic": round(total_chronic / counted, 1) if counted else 0,
+        "risk_counts": risk_counts,
+        "athletes_with_sufficient_data": counted,
+    }
+    return {"team": team, "athletes": out_athletes, "summary": summary}
+
+
+# ---------------------- Monthly Summary ----------------------
+@api.get("/analytics/monthly/{athlete_id}")
+async def monthly_summary(athlete_id: str, months: int = 6, user=Depends(get_current_user)):
+    """Monthly average load + sleep + evolution vs previous month, last N months."""
+    team = await _get_team_or_404(user)
+    athlete = await db.athletes.find_one({"id": athlete_id, "team_id": team["id"]}, {"_id": 0})
+    if not athlete:
+        raise HTTPException(404, "Atleta não encontrado")
+    sessions = await db.sessions.find({"athlete_id": athlete_id}, {"_id": 0}).to_list(5000)
+
+    # group by YYYY-MM
+    by_month = defaultdict(list)
+    for s in sessions:
+        key = s["date"][:7]
+        by_month[key].append(s)
+
+    # determine last N months from today
+    today = date.today()
+    keys = []
+    y, m = today.year, today.month
+    for _ in range(months):
+        keys.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    keys.reverse()
+
+    months_out = []
+    prev_avg = None
+    for k in keys:
+        ms = by_month.get(k, [])
+        if ms:
+            total_load = sum(s["load"] for s in ms)
+            avg_load = round(total_load / len(ms), 1)
+            avg_sleep = round(sum(s["sleep_quality"] for s in ms) / len(ms), 2)
+            sessions_count = len(ms)
+        else:
+            total_load = 0
+            avg_load = 0
+            avg_sleep = 0
+            sessions_count = 0
+        delta = None
+        delta_pct = None
+        if prev_avg is not None and prev_avg > 0 and avg_load > 0:
+            delta = round(avg_load - prev_avg, 1)
+            delta_pct = round((avg_load - prev_avg) / prev_avg * 100, 1)
+        if avg_load > 0:
+            prev_avg = avg_load
+        months_out.append({
+            "month": k,
+            "sessions": sessions_count,
+            "total_load": round(total_load, 1),
+            "avg_load": avg_load,
+            "avg_sleep": avg_sleep,
+            "delta_load": delta,
+            "delta_load_pct": delta_pct,
+        })
+
+    # overall evolution
+    valid = [m for m in months_out if m["avg_load"] > 0]
+    if len(valid) >= 2:
+        first = valid[0]["avg_load"]
+        last = valid[-1]["avg_load"]
+        evolution = "subiu" if last > first else "desceu" if last < first else "estável"
+        evolution_pct = round((last - first) / first * 100, 1) if first > 0 else 0
+    else:
+        evolution = "indeterminado"
+        evolution_pct = 0
+
+    return {
+        "athlete": athlete,
+        "months": months_out,
+        "evolution": evolution,
+        "evolution_pct": evolution_pct,
+    }
+
+
+# ---------------------- Compare 2 Athletes ----------------------
+@api.get("/analytics/compare")
+async def compare_athletes(a1: str, a2: str, user=Depends(get_current_user)):
+    team = await _get_team_or_404(user)
+    out = []
+    for aid in (a1, a2):
+        athlete = await db.athletes.find_one({"id": aid, "team_id": team["id"]}, {"_id": 0})
+        if not athlete:
+            raise HTTPException(404, f"Atleta {aid} não encontrado")
+        sessions = await db.sessions.find({"athlete_id": aid}, {"_id": 0}).to_list(5000)
+        metrics = compute_metrics_for_athlete(sessions)
+
+        ref = date.today()
+        by_day = defaultdict(float)
+        for s in sessions:
+            by_day[_parse_date(s["date"])] += s["load"]
+
+        series = []
+        for i in range(59, -1, -1):
+            d = ref - timedelta(days=i)
+            acute = sum(by_day.get(d - timedelta(days=j), 0) for j in range(7))
+            weekly = []
+            for w in range(4):
+                ws = sum(by_day.get(d - timedelta(days=j), 0) for j in range(w * 7, (w + 1) * 7))
+                weekly.append(ws)
+            chronic = sum(weekly) / 4
+            acwr = round(acute / chronic, 2) if chronic > 0 else 0
+            series.append({"date": d.isoformat(), "acute": round(acute, 1), "chronic": round(chronic, 1), "acwr": acwr})
+
+        out.append({"athlete": athlete, "metrics": metrics, "series": series})
+
+    # merge series by date for overlay chart
+    merged = []
+    s1, s2 = out[0]["series"], out[1]["series"]
+    for i in range(len(s1)):
+        merged.append({
+            "date": s1[i]["date"],
+            "a1_acwr": s1[i]["acwr"],
+            "a2_acwr": s2[i]["acwr"],
+            "a1_acute": s1[i]["acute"],
+            "a2_acute": s2[i]["acute"],
+        })
+
+    return {"a1": out[0], "a2": out[1], "merged_series": merged}
+
+
+# ---------------------- Injuries ----------------------
+@api.get("/injuries")
+async def list_injuries(athlete_id: Optional[str] = None, user=Depends(get_current_user)):
+    team = await db.teams.find_one({"user_id": user["id"]})
+    if not team:
+        return []
+    q = {"team_id": team["id"]}
+    if athlete_id:
+        q["athlete_id"] = athlete_id
+    items = await db.injuries.find(q, {"_id": 0}).sort("start_date", -1).to_list(500)
+    return items
+
+
+@api.post("/injuries")
+async def create_injury(data: InjuryIn, user=Depends(get_current_user)):
+    team = await _get_team_or_404(user)
+    athlete = await db.athletes.find_one({"id": data.athlete_id, "team_id": team["id"]})
+    if not athlete:
+        raise HTTPException(404, "Atleta não encontrado")
+    if data.severity not in ("low", "medium", "high"):
+        raise HTTPException(400, "Severidade inválida")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "athlete_id": data.athlete_id,
+        "team_id": team["id"],
+        "type": data.type,
+        "body_part": data.body_part,
+        "start_date": data.start_date,
+        "end_date": data.end_date,
+        "severity": data.severity,
+        "notes": data.notes,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.injuries.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.delete("/injuries/{injury_id}")
+async def delete_injury(injury_id: str, user=Depends(get_current_user)):
+    team = await _get_team_or_404(user)
+    await db.injuries.delete_one({"id": injury_id, "team_id": team["id"]})
+    return {"ok": True}
+
+
+# ---------------------- Demo Data Seeding ----------------------
+@api.post("/seed/demo")
+async def seed_demo(user=Depends(get_current_user)):
+    """Populate demo team, athletes & 45 days of sessions for current user."""
+    # delete existing
+    team = await db.teams.find_one({"user_id": user["id"]})
+    if team:
+        await db.sessions.delete_many({"team_id": team["id"]})
+        await db.athletes.delete_many({"team_id": team["id"]})
+        await db.injuries.delete_many({"team_id": team["id"]})
+        await db.teams.delete_one({"id": team["id"]})
+
+    team_id = str(uuid.uuid4())
+    await db.teams.insert_one({
+        "id": team_id,
+        "user_id": user["id"],
+        "name": "Sporting Futsal Lisboa",
+        "escalao": "Sénior",
+        "epoca": "2025/2026",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    demo_athletes = [
+        ("João Silva", "Guarda-Redes", 1),
+        ("Pedro Costa", "Fixo", 4),
+        ("Miguel Santos", "Ala", 7),
+        ("Rui Mendes", "Ala", 10),
+        ("Tiago Pereira", "Pivô", 9),
+        ("André Lopes", "Fixo", 5),
+        ("Bruno Ferreira", "Ala", 11),
+        ("Carlos Almeida", "Pivô", 8),
+    ]
+    athlete_ids = []
+    for name, pos, num in demo_athletes:
+        aid = str(uuid.uuid4())
+        athlete_ids.append((aid, name))
+        await db.athletes.insert_one({
+            "id": aid,
+            "team_id": team_id,
+            "name": name,
+            "position": pos,
+            "jersey_number": num,
+            "birth_date": None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    # 45 days of sessions, ~4 per week
+    today = date.today()
+    random.seed(42)
+    sessions_to_insert = []
+    for aid, _ in athlete_ids:
+        for i in range(45, 0, -1):
+            d = today - timedelta(days=i)
+            # train Mon/Tue/Thu/Fri (weekdays 0,1,3,4) + match Sat
+            wd = d.weekday()
+            train = wd in (0, 1, 3, 4, 5)
+            if not train:
+                continue
+            if random.random() < 0.15:
+                continue  # absence
+            base_rpe = 6 if wd == 5 else 5
+            rpe = max(1, min(10, base_rpe + random.randint(-2, 3)))
+            duration = 90 if wd == 5 else random.choice([60, 75, 90])
+            # spike injection on day 7 to demo high risk
+            if i in (5, 6, 7) and random.random() < 0.4:
+                rpe = min(10, rpe + 2)
+                duration += 20
+            sleep = random.randint(2, 5)
+            sessions_to_insert.append({
+                "id": str(uuid.uuid4()),
+                "athlete_id": aid,
+                "team_id": team_id,
+                "date": d.isoformat(),
+                "rpe": rpe,
+                "duration_min": duration,
+                "sleep_quality": sleep,
+                "load": rpe * duration,
+                "notes": None,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+    if sessions_to_insert:
+        await db.sessions.insert_many(sessions_to_insert)
+
+    # seed sample injuries on a couple of athletes
+    await db.injuries.delete_many({"team_id": team_id})
+    injuries_demo = [
+        # athlete index, type, body_part, start_offset_days, end_offset_days_or_none, severity
+        (3, "Lesão muscular", "Coxa direita", 95, 70, "medium"),
+        (4, "Entorse", "Tornozelo esquerdo", 180, 160, "high"),
+        (0, "Contratura", "Lombar", 30, 22, "low"),
+    ]
+    for ath_idx, typ, body, start_off, end_off, sev in injuries_demo:
+        if ath_idx < len(athlete_ids):
+            aid, _ = athlete_ids[ath_idx]
+            await db.injuries.insert_one({
+                "id": str(uuid.uuid4()),
+                "athlete_id": aid,
+                "team_id": team_id,
+                "type": typ,
+                "body_part": body,
+                "start_date": (today - timedelta(days=start_off)).isoformat(),
+                "end_date": (today - timedelta(days=end_off)).isoformat() if end_off else None,
+                "severity": sev,
+                "notes": None,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+    return {
+        "ok": True,
+        "team_id": team_id,
+        "athletes": len(athlete_ids),
+        "sessions": len(sessions_to_insert),
+    }
+
+
+@api.delete("/seed/demo")
+async def clear_data(user=Depends(get_current_user)):
+    team = await db.teams.find_one({"user_id": user["id"]})
+    if team:
+        await db.sessions.delete_many({"team_id": team["id"]})
+        await db.athletes.delete_many({"team_id": team["id"]})
+        await db.injuries.delete_many({"team_id": team["id"]})
+        await db.teams.delete_one({"id": team["id"]})
+    return {"ok": True}
+
+
+# ---------------------- Startup ----------------------
+@app.on_event("startup")
+async def on_startup():
+    await db.users.create_index("email", unique=True)
+    await db.teams.create_index("user_id")
+    await db.athletes.create_index("team_id")
+    await db.sessions.create_index([("athlete_id", 1), ("date", -1)])
+
+    # seed admin
+    admin_email = os.environ.get("ADMIN_EMAIL", "treinador@futsal.pt").lower()
+    admin_pwd = os.environ.get("ADMIN_PASSWORD", "treinador123")
+    existing = await db.users.find_one({"email": admin_email})
+    if not existing:
+        await db.users.insert_one({
+            "id": str(uuid.uuid4()),
+            "email": admin_email,
+            "password_hash": hash_password(admin_pwd),
+            "name": "Treinador Principal",
+            "role": "coach",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    else:
+        if not verify_password(admin_pwd, existing["password_hash"]):
+            await db.users.update_one(
+                {"email": admin_email},
+                {"$set": {"password_hash": hash_password(admin_pwd)}},
+            )
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    client.close()
+
+
+app.include_router(api)
+
+frontend_url = os.environ.get("FRONTEND_URL", "*")
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=[frontend_url] if frontend_url != "*" else ["*"],
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
+logging.basicConfig(level=logging.INFO)
