@@ -46,7 +46,17 @@ e estilo dashboard.
 - Botão "Reset Total" com confirmação textual (ELIMINAR)
 - Upload de foto do jogador (JPG/PNG/WebP, máx 5MB) com endpoint público para `<img src>`
 
-## Phase 3 — Deferred (Backlog priorizado)
+## Phase 3 — Implemented (15 Fev 2026)
+- Calendário com vista 4-semanas: heatmap de carga + sessões planeadas + detalhe diário
+- Endpoints `planned-sessions` (criar/listar/eliminar) e `/api/calendar?start=&days=`
+- Dropdown na Vista Detalhada do Dashboard: "Equipa (Visão Geral)" por defeito + atletas individuais
+- Endpoint `/api/analytics/team-detailed` (ACWR/Monotonia/Strain agregados da equipa)
+- Métricas extra no Dashboard: Sono Médio + Monotonia Média (com borda colorida da zona)
+- Alerta visual de Monotonia da equipa com mensagem descritiva
+- Resumo Mensal com opção "Equipa (Visão Geral)" — endpoint `/api/analytics/monthly/team/overview`
+- Demo seed agora também cria 5 sessões planeadas nos próximos 10 dias
+
+## Phase 4 — Deferred (Backlog priorizado)
 ### P0
 - **Resumo Mensal Automático**: para cada atleta, média de carga e qualidade do sono
   por mês, com destaque de evolução (delta vs. mês anterior)
