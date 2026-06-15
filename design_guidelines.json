@@ -1,0 +1,127 @@
+{
+  "theme": "dark",
+  "archetype": "2 (Performance Pro)",
+  "colors": {
+    "background": {
+      "default": "#0A0A0A",
+      "card": "#141414",
+      "surface": "#1A1A1A"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A3A3A3",
+      "disabled": "#525252"
+    },
+    "primary": {
+      "main": "#CCFF00",
+      "hover": "#E6FF66",
+      "foreground": "#000000"
+    },
+    "status": {
+      "safe": "#00E676",
+      "warning": "#FFEA00",
+      "danger": "#FF3B30"
+    },
+    "border": {
+      "default": "rgba(255, 255, 255, 0.1)",
+      "focus": "#CCFF00"
+    }
+  },
+  "typography": {
+    "headings": {
+      "fontFamily": "Barlow Condensed, sans-serif",
+      "weights": [600, 700, 800],
+      "tracking": "tracking-tight",
+      "textTransform": "uppercase"
+    },
+    "body": {
+      "fontFamily": "Manrope, sans-serif",
+      "weights": [400, 500, 600],
+      "tracking": "tracking-normal",
+      "textTransform": "none"
+    },
+    "mono": {
+      "fontFamily": "JetBrains Mono, monospace",
+      "weights": [400, 500, 700],
+      "tracking": "tracking-tighter"
+    },
+    "hierarchy": {
+      "h1": "text-4xl md:text-5xl lg:text-6xl uppercase tracking-tighter font-black",
+      "h2": "text-2xl md:text-3xl lg:text-4xl uppercase tracking-tight font-bold",
+      "h3": "text-xl md:text-2xl uppercase font-semibold",
+      "body": "text-sm md:text-base text-[#A3A3A3]",
+      "label": "text-xs tracking-[0.2em] uppercase text-[#525252]",
+      "metric": "text-4xl md:text-5xl font-mono font-bold tracking-tighter text-white"
+    }
+  },
+  "layouts": {
+    "grid_system": {
+      "mode": "Control Room Grid",
+      "description": "Dense, data-correlation, scanability. Base grid cols 1 (mobile), md:cols-3, lg:cols-4. Tight gaps (gap-4 or gap-6). Use h-full on children to stretch."
+    },
+    "spacing": {
+      "containers": "p-6 md:p-8",
+      "cards": "p-4 md:p-6",
+      "sections": "py-12 md:py-24"
+    },
+    "alignment": "Left-aligned for data and labels. Optical alignment for icons. Avoid symmetry, create tension through layout."
+  },
+  "components": {
+    "cards": {
+      "style": "Flat background (#141414), 1px solid border (rgba(255,255,255,0.1)), no shadow by default. Hover state: subtle lift (-translate-y-1) and primary color border glow.",
+      "radius": "rounded-none or max rounded-sm (2px) for tactical feel."
+    },
+    "buttons": {
+      "primary": "bg-[#CCFF00] text-black font-bold uppercase tracking-widest hover:bg-[#E6FF66] focus:ring-2 focus:ring-[#CCFF00]/50 transition-colors rounded-none",
+      "secondary": "bg-transparent border border-white/20 text-white hover:bg-white/5 hover:text-white rounded-none uppercase tracking-widest text-sm"
+    },
+    "badges": {
+      "risk_high": "bg-[#FF3B30]/10 text-[#FF3B30] border border-[#FF3B30]/20 rounded-none uppercase text-xs tracking-wider px-2 py-1",
+      "risk_medium": "bg-[#FFEA00]/10 text-[#FFEA00] border border-[#FFEA00]/20 rounded-none uppercase text-xs tracking-wider px-2 py-1",
+      "risk_low": "bg-[#00E676]/10 text-[#00E676] border border-[#00E676]/20 rounded-none uppercase text-xs tracking-wider px-2 py-1"
+    },
+    "charts": {
+      "library": "recharts",
+      "guidelines": "Use monochromatic or high-contrast lines against dark background. Use #CCFF00 for primary metric (e.g. ACWR), #FFFFFF for Acute Load, and #A3A3A3 for Chronic Load."
+    },
+    "empty_states": {
+      "team_data": "If no team data inserted, show a centered bold text 'Insira dados da equipa' with a call-to-action button to add data.",
+      "acwr_data": "If days since first training < 28, show blurred chart or empty state card with 'Dados Insuficientes'."
+    }
+  },
+  "motion": {
+    "hover": "transition-all duration-200 ease-in-out",
+    "page_transition": "framer-motion fade in and slight slide up (y: 20 -> 0)",
+    "chart_animation": "Line drawing animation on mount."
+  },
+  "icons": {
+    "library": "@phosphor-icons/react",
+    "weight": "bold",
+    "instruction": "yarn add @phosphor-icons/react"
+  },
+  "image_urls": [
+    {
+      "category": "hero_background",
+      "description": "Blurred action shot of futsal players to use as a low-opacity background behind auth/login screen",
+      "url": "https://images.unsplash.com/photo-1630420598913-44208d36f9af?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwyfHxmdXRzYWwlMjBtYXRjaCUyMGFjdGlvbnxlbnwwfHx8fDE3ODE1MjM5MDN8MA&ixlib=rb-4.1.0&q=85"
+    },
+    {
+      "category": "auth_visual",
+      "description": "Futsal ball on court for the login split screen",
+      "url": "https://images.unsplash.com/photo-1587384474964-3a06ce1ce699?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwxfHxmdXRzYWwlMjBtYXRjaCUyMGFjdGlvbnxlbnwwfHx8fDE3ODE1MjM5MDN8MA&ixlib=rb-4.1.0&q=85"
+    }
+  ],
+  "instructions_to_main_agent": [
+    "Implement a deep dark mode dashboard for Futsal Workload Monitoring. Base background is #0A0A0A (Performance Pro archetype).",
+    "Data visualization is core: integrate 'recharts' for ACWR, Acute vs Chronic load, Monotony, and Strain.",
+    "ACWR Business Logic: Calculate Acute (7 days rolling sum) and Chronic (28 days rolling avg of acute). ACWR = Acute / Chronic. If less than 28 days of data, display 'Dados Insuficientes' badge and block the ACWR chart.",
+    "Empty State: If no team configured, show 'Insira dados da equipa' in the Team Profile / Overview sections.",
+    "Team Profile Fields: Name, Escalão (Category), Época (Season).",
+    "Athlete Logging: Form needs Date, RPE (1-10), Duration (mins), Sleep Quality (1-5 or 1-10). Calculate Load = RPE * Duration.",
+    "Athlete Comparison: Build a side-by-side view (grid-cols-2) comparing two selected athletes' metrics and charts.",
+    "Monthly Summary: Generate a view/component summarizing average training load and sleep quality per athlete for the month, showing physical condition evolution.",
+    "Use Phosphor Icons for the technical, bold look suitable for a sports dashboard.",
+    "All interactive and key informational elements MUST include a data-testid attribute.",
+    "Avoid standard Shadcn rounded cards. Override Shadcn to use flat cards (bg-[#141414], border border-white/10, rounded-none)."
+  ]
+}
