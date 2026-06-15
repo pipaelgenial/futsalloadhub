@@ -56,7 +56,15 @@ e estilo dashboard.
 - Resumo Mensal com opção "Equipa (Visão Geral)" — endpoint `/api/analytics/monthly/team/overview`
 - Demo seed agora também cria 5 sessões planeadas nos próximos 10 dias
 
-## Phase 4 — Deferred (Backlog priorizado)
+## Phase 4 — Implemented (15 Fev 2026)
+- **Bem-Estar Corporal (1-10)** integrado no registo de sessões com picker visual colorido (vermelho→volt)
+- Bem-Estar incluído no cálculo de risco: 1-2 força "danger"; 3-4 escala risco; 5-6 modera; 7-10 saudável
+- **Resumo Semanal** (substitui Resumo Mensal) com gráficos de carga + sono + bem-estar e selector 4/8/12 semanas
+- **Edição inline de sessões** no perfil do atleta (data, RPE, duração, sono, bem-estar) com recálculo automático da carga
+- Endpoint PUT `/api/sessions/{id}` para edição
+- Novo card "Bem-Estar (7d)" no perfil + "Bem-Estar Médio" no Dashboard
+
+## Phase 5 — Deferred
 ### P0
 - **Resumo Mensal Automático**: para cada atleta, média de carga e qualidade do sono
   por mês, com destaque de evolução (delta vs. mês anterior)
