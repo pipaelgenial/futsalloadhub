@@ -34,7 +34,19 @@ e estilo dashboard.
 - Mensagem "DADOS INSUFICIENTES" no painel ACWR antes dos 28 dias
 - Seed de demo (1 equipa + 8 atletas + ~225 sessões em 45 dias)
 
-## Phase 2 — Deferred (Backlog priorizado)
+## Phase 2 — Implemented (15 Fev 2026)
+- Resumo Mensal Automático por atleta (carga média, sono, evolução vs. mês anterior)
+- Comparação lado-a-lado de 2 atletas (métricas + ACWR sobreposto)
+- Histórico de Lesões com severidade + alerta contextual
+- Cálculo refinado de risco com limiares clínicos:
+  - ACWR: <0.8 destreinamento, 0.8-1.3 sweet spot, 1.3-1.5 alerta, ≥1.5 alto risco
+  - Monotonia: <1.0 boa variação, 1.0-1.5 ideal, 1.5-2.0 mod-alto, >2.0 crítico
+  - Strain: <1500 baixo, 1500-3000 moderado, 3000-6000 elevado, >6000 extremo
+- Descrição do risco em texto (sub-treinamento, risco de lesão, monotonia elevada, etc.)
+- Botão "Reset Total" com confirmação textual (ELIMINAR)
+- Upload de foto do jogador (JPG/PNG/WebP, máx 5MB) com endpoint público para `<img src>`
+
+## Phase 3 — Deferred (Backlog priorizado)
 ### P0
 - **Resumo Mensal Automático**: para cada atleta, média de carga e qualidade do sono
   por mês, com destaque de evolução (delta vs. mês anterior)
