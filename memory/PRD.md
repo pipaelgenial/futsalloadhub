@@ -64,7 +64,15 @@ e estilo dashboard.
 - Endpoint PUT `/api/sessions/{id}` para edição
 - Novo card "Bem-Estar (7d)" no perfil + "Bem-Estar Médio" no Dashboard
 
-## Phase 5 — Deferred
+## Phase 5 — Implemented (15 Fev 2026)
+- **Tipo de Sessão** (TREINO/JOGO/GINÁSIO/RECUPERAÇÃO) no registo diário com picker visual
+- Tipo de sessão exibido no Calendário em badges coloridos por dia + tabela de detalhe diário
+- **Planeamento removido do Calendário** — apenas overview de cargas totais e tipos de sessão
+- Card "Distribuição por Tipo" no Calendário com contagem por tipo nas 4 semanas
+- **Vista Detalhada do Dashboard** com cores de zona em ACWR, Monotonia e Strain (verde=ideal, amarelo=alerta, vermelho=crítico) + etiqueta da zona ("Zona Ótima", "Mod-Alta", "Extremo", etc.)
+- Edição inline de sessões agora também permite alterar o tipo
+
+## Phase 6 — Deferred
 ### P0
 - **Resumo Mensal Automático**: para cada atleta, média de carga e qualidade do sono
   por mês, com destaque de evolução (delta vs. mês anterior)
