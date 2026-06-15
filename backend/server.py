@@ -138,6 +138,14 @@ class InjuryIn(BaseModel):
     notes: Optional[str] = None
 
 
+class PlannedSessionIn(BaseModel):
+    date: str  # YYYY-MM-DD
+    planned_rpe: int = Field(ge=1, le=10)
+    planned_duration: int = Field(ge=1, le=300)
+    notes: Optional[str] = None
+    athlete_ids: Optional[List[str]] = None  # None or [] means team-wide
+
+
 # ---------------------- Auth Routes ----------------------
 @api.post("/auth/register")
 async def register(data: RegisterIn, response: Response):
@@ -599,6 +607,9 @@ async def analytics_team(user=Depends(get_current_user)):
     out_athletes = []
     total_acute = 0
     total_chronic = 0
+    total_monotony = 0
+    total_sleep = 0
+    sleep_count = 0
     counted = 0
     risk_counts = {"safe": 0, "warning": 0, "danger": 0, "insufficient": 0, "low": 0, "no_data": 0}
     for a in athletes:
@@ -610,11 +621,32 @@ async def analytics_team(user=Depends(get_current_user)):
             total_acute += m["acute"]
             total_chronic += m["chronic"]
             counted += 1
+        if m.get("monotony"):
+            total_monotony += m["monotony"]
+        if m.get("avg_sleep"):
+            total_sleep += m["avg_sleep"]
+            sleep_count += 1
+
+    monotony_count = sum(1 for a in out_athletes if a["metrics"].get("monotony"))
+    avg_monotony = round(total_monotony / monotony_count, 2) if monotony_count else 0
+    if avg_monotony == 0:
+        mono_zone = "no_data"
+    elif avg_monotony < 1.0:
+        mono_zone = "high_variation"
+    elif avg_monotony <= 1.5:
+        mono_zone = "ideal"
+    elif avg_monotony <= 2.0:
+        mono_zone = "moderate_high"
+    else:
+        mono_zone = "critical"
 
     summary = {
         "athletes_count": len(athletes),
         "avg_acute": round(total_acute / counted, 1) if counted else 0,
         "avg_chronic": round(total_chronic / counted, 1) if counted else 0,
+        "avg_sleep": round(total_sleep / sleep_count, 2) if sleep_count else 0,
+        "avg_monotony": avg_monotony,
+        "avg_monotony_zone": mono_zone,
         "risk_counts": risk_counts,
         "athletes_with_sufficient_data": counted,
     }
@@ -790,6 +822,287 @@ async def delete_injury(injury_id: str, user=Depends(get_current_user)):
     return {"ok": True}
 
 
+# ---------------------- Planned Sessions & Calendar ----------------------
+@api.get("/planned-sessions")
+async def list_planned(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    user=Depends(get_current_user),
+):
+    team = await db.teams.find_one({"user_id": user["id"]})
+    if not team:
+        return []
+    q = {"team_id": team["id"]}
+    if start and end:
+        q["date"] = {"$gte": start, "$lte": end}
+    items = await db.planned_sessions.find(q, {"_id": 0}).sort("date", 1).to_list(1000)
+    return items
+
+
+@api.post("/planned-sessions")
+async def create_planned(data: PlannedSessionIn, user=Depends(get_current_user)):
+    team = await _get_team_or_404(user)
+    doc = {
+        "id": str(uuid.uuid4()),
+        "team_id": team["id"],
+        "date": data.date,
+        "planned_rpe": data.planned_rpe,
+        "planned_duration": data.planned_duration,
+        "planned_load": data.planned_rpe * data.planned_duration,
+        "notes": data.notes,
+        "athlete_ids": data.athlete_ids or [],  # empty list = team-wide
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.planned_sessions.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.delete("/planned-sessions/{planned_id}")
+async def delete_planned(planned_id: str, user=Depends(get_current_user)):
+    team = await _get_team_or_404(user)
+    await db.planned_sessions.delete_one({"id": planned_id, "team_id": team["id"]})
+    return {"ok": True}
+
+
+@api.get("/calendar")
+async def calendar_view(start: str, days: int = 28, user=Depends(get_current_user)):
+    """Day-by-day aggregate of recorded sessions and planned sessions for the team."""
+    team = await db.teams.find_one({"user_id": user["id"]}, {"_id": 0})
+    if not team:
+        return {"team": None, "days": []}
+    start_d = _parse_date(start)
+    end_d = start_d + timedelta(days=days - 1)
+    end_iso = end_d.isoformat()
+    sessions = await db.sessions.find(
+        {"team_id": team["id"], "date": {"$gte": start, "$lte": end_iso}}, {"_id": 0}
+    ).to_list(5000)
+    planned = await db.planned_sessions.find(
+        {"team_id": team["id"], "date": {"$gte": start, "$lte": end_iso}}, {"_id": 0}
+    ).to_list(1000)
+    athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).to_list(500)
+    a_map = {a["id"]: a for a in athletes}
+
+    by_day_rec = defaultdict(list)
+    for s in sessions:
+        by_day_rec[s["date"]].append(s)
+    by_day_plan = defaultdict(list)
+    for p in planned:
+        by_day_plan[p["date"]].append(p)
+
+    out_days = []
+    for i in range(days):
+        d = (start_d + timedelta(days=i)).isoformat()
+        rec = by_day_rec.get(d, [])
+        plan = by_day_plan.get(d, [])
+        total_load = sum(s["load"] for s in rec)
+        athletes_trained = []
+        for s in rec:
+            a = a_map.get(s["athlete_id"], {})
+            athletes_trained.append({
+                "athlete_id": s["athlete_id"],
+                "name": a.get("name", "—"),
+                "jersey_number": a.get("jersey_number"),
+                "rpe": s["rpe"],
+                "duration_min": s["duration_min"],
+                "load": s["load"],
+                "session_id": s["id"],
+            })
+        out_days.append({
+            "date": d,
+            "weekday": (start_d + timedelta(days=i)).weekday(),
+            "total_load": round(total_load, 1),
+            "athletes_count": len(rec),
+            "athletes": athletes_trained,
+            "planned": plan,
+        })
+
+    return {
+        "team": team,
+        "start": start,
+        "end": end_iso,
+        "days": out_days,
+        "athletes": athletes,
+    }
+
+
+# ---------------------- Team-wide analytics ----------------------
+def _team_metrics_from_daily(by_day: dict, ref_date: Optional[date] = None) -> dict:
+    """Compute team-wide ACWR/monotony/strain from a {date: total_load} mapping."""
+    if ref_date is None:
+        ref_date = date.today()
+    if not by_day:
+        return {
+            "acute": 0, "chronic": 0, "acwr": 0, "monotony": 0, "strain": 0,
+            "sufficient_data": False, "days_since_first": 0,
+            "acwr_zone": "no_data", "monotony_zone": "no_data", "strain_zone": "no_data",
+        }
+    first_date = min(by_day.keys())
+    days_since_first = (ref_date - first_date).days
+    acute = sum(by_day.get(ref_date - timedelta(days=i), 0) for i in range(7))
+    weekly_loads = [
+        sum(by_day.get(ref_date - timedelta(days=i), 0) for i in range(w * 7, (w + 1) * 7))
+        for w in range(4)
+    ]
+    chronic = sum(weekly_loads) / 4 if weekly_loads else 0
+    acwr = round(acute / chronic, 2) if chronic > 0 else 0
+    week_loads = [by_day.get(ref_date - timedelta(days=i), 0) for i in range(7)]
+    mean_l = sum(week_loads) / 7
+    var_l = sum((x - mean_l) ** 2 for x in week_loads) / 7
+    std_l = math.sqrt(var_l)
+    monotony = round(mean_l / std_l, 2) if std_l > 0 else 0
+    strain = round(sum(week_loads) * monotony, 2) if monotony else 0
+
+    # zones
+    if acwr == 0: acwr_zone = "no_data"
+    elif acwr < 0.8: acwr_zone = "detraining"
+    elif acwr <= 1.3: acwr_zone = "sweet_spot"
+    elif acwr < 1.5: acwr_zone = "alert"
+    else: acwr_zone = "high_risk"
+
+    if monotony == 0: mono_zone = "no_data"
+    elif monotony < 1.0: mono_zone = "high_variation"
+    elif monotony <= 1.5: mono_zone = "ideal"
+    elif monotony <= 2.0: mono_zone = "moderate_high"
+    else: mono_zone = "critical"
+
+    if strain == 0: strain_zone = "no_data"
+    elif strain < 1500: strain_zone = "low"
+    elif strain <= 3000: strain_zone = "moderate"
+    elif strain <= 6000: strain_zone = "elevated"
+    else: strain_zone = "extreme"
+
+    return {
+        "acute": round(acute, 1),
+        "chronic": round(chronic, 1),
+        "acwr": acwr,
+        "monotony": monotony,
+        "strain": strain,
+        "sufficient_data": days_since_first >= 28,
+        "days_since_first": days_since_first,
+        "acwr_zone": acwr_zone,
+        "monotony_zone": mono_zone,
+        "strain_zone": strain_zone,
+    }
+
+
+@api.get("/analytics/team-detailed")
+async def team_detailed(user=Depends(get_current_user)):
+    """Team-wide ACWR series & metrics computed from average per-athlete daily load
+    (so the magnitude is comparable to an individual athlete)."""
+    team = await db.teams.find_one({"user_id": user["id"]}, {"_id": 0})
+    if not team:
+        return {"team": None, "metrics": None, "series": []}
+    athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).to_list(500)
+    if not athletes:
+        return {"team": team, "metrics": None, "series": []}
+    sessions = await db.sessions.find({"team_id": team["id"]}, {"_id": 0}).to_list(20000)
+
+    n_athletes = len(athletes)
+    by_day = defaultdict(float)
+    for s in sessions:
+        by_day[_parse_date(s["date"])] += s["load"]
+    # average per athlete (treat team as a "super athlete" with avg load)
+    by_day_avg = {d: v / n_athletes for d, v in by_day.items()}
+
+    metrics = _team_metrics_from_daily(by_day_avg)
+
+    ref = date.today()
+    series = []
+    for i in range(59, -1, -1):
+        d = ref - timedelta(days=i)
+        acute = sum(by_day_avg.get(d - timedelta(days=j), 0) for j in range(7))
+        weekly = [
+            sum(by_day_avg.get(d - timedelta(days=j), 0) for j in range(w * 7, (w + 1) * 7))
+            for w in range(4)
+        ]
+        chronic = sum(weekly) / 4
+        acwr = round(acute / chronic, 2) if chronic > 0 else 0
+        series.append({
+            "date": d.isoformat(),
+            "load": round(by_day_avg.get(d, 0), 1),
+            "acute": round(acute, 1),
+            "chronic": round(chronic, 1),
+            "acwr": acwr,
+        })
+
+    return {"team": team, "metrics": metrics, "series": series, "n_athletes": n_athletes}
+
+
+@api.get("/analytics/monthly/team/overview")
+async def monthly_team_overview(months: int = 6, user=Depends(get_current_user)):
+    """Team-wide monthly aggregates."""
+    team = await db.teams.find_one({"user_id": user["id"]}, {"_id": 0})
+    if not team:
+        raise HTTPException(400, "Insira dados da equipa primeiro")
+    athletes_count = await db.athletes.count_documents({"team_id": team["id"]})
+    sessions = await db.sessions.find({"team_id": team["id"]}, {"_id": 0}).to_list(20000)
+
+    by_month = defaultdict(list)
+    for s in sessions:
+        by_month[s["date"][:7]].append(s)
+
+    today = date.today()
+    keys = []
+    y, m = today.year, today.month
+    for _ in range(months):
+        keys.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    keys.reverse()
+
+    months_out = []
+    prev_avg = None
+    for k in keys:
+        ms = by_month.get(k, [])
+        if ms:
+            total_load = sum(s["load"] for s in ms)
+            avg_load = round(total_load / len(ms), 1)
+            avg_sleep = round(sum(s["sleep_quality"] for s in ms) / len(ms), 2)
+            sessions_count = len(ms)
+        else:
+            total_load = 0
+            avg_load = 0
+            avg_sleep = 0
+            sessions_count = 0
+        delta = None
+        delta_pct = None
+        if prev_avg is not None and prev_avg > 0 and avg_load > 0:
+            delta = round(avg_load - prev_avg, 1)
+            delta_pct = round((avg_load - prev_avg) / prev_avg * 100, 1)
+        if avg_load > 0:
+            prev_avg = avg_load
+        months_out.append({
+            "month": k,
+            "sessions": sessions_count,
+            "total_load": round(total_load, 1),
+            "avg_load": avg_load,
+            "avg_sleep": avg_sleep,
+            "delta_load": delta,
+            "delta_load_pct": delta_pct,
+        })
+
+    valid = [m for m in months_out if m["avg_load"] > 0]
+    if len(valid) >= 2:
+        first_v = valid[0]["avg_load"]
+        last_v = valid[-1]["avg_load"]
+        evolution = "subiu" if last_v > first_v else "desceu" if last_v < first_v else "estável"
+        evolution_pct = round((last_v - first_v) / first_v * 100, 1) if first_v > 0 else 0
+    else:
+        evolution = "indeterminado"
+        evolution_pct = 0
+
+    return {
+        "team": team,
+        "athletes_count": athletes_count,
+        "months": months_out,
+        "evolution": evolution,
+        "evolution_pct": evolution_pct,
+    }
+
+
 # ---------------------- Demo Data Seeding ----------------------
 @api.post("/seed/demo")
 async def seed_demo(user=Depends(get_current_user)):
@@ -800,6 +1113,7 @@ async def seed_demo(user=Depends(get_current_user)):
         await db.sessions.delete_many({"team_id": team["id"]})
         await db.athletes.delete_many({"team_id": team["id"]})
         await db.injuries.delete_many({"team_id": team["id"]})
+        await db.planned_sessions.delete_many({"team_id": team["id"]})
         await db.teams.delete_one({"id": team["id"]})
 
     team_id = str(uuid.uuid4())
@@ -897,11 +1211,34 @@ async def seed_demo(user=Depends(get_current_user)):
                 "created_at": datetime.now(timezone.utc).isoformat(),
             })
 
+    # seed a few planned sessions for next 10 days
+    await db.planned_sessions.delete_many({"team_id": team_id})
+    planned_demo = [
+        (1, 6, 75, "Treino técnico-tático", []),
+        (2, 7, 90, "Sessão intensiva — pressão alta", []),
+        (4, 5, 60, "Recuperação ativa + sets reduzidos", []),
+        (6, 8, 90, "Jogo treino vs juniores", []),
+        (8, 7, 90, "Simulação de jogo", []),
+    ]
+    for offset, rpe, dur, notes, aids in planned_demo:
+        await db.planned_sessions.insert_one({
+            "id": str(uuid.uuid4()),
+            "team_id": team_id,
+            "date": (today + timedelta(days=offset)).isoformat(),
+            "planned_rpe": rpe,
+            "planned_duration": dur,
+            "planned_load": rpe * dur,
+            "notes": notes,
+            "athlete_ids": aids,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
     return {
         "ok": True,
         "team_id": team_id,
         "athletes": len(athlete_ids),
         "sessions": len(sessions_to_insert),
+        "planned": len(planned_demo),
     }
 
 
@@ -920,6 +1257,7 @@ async def clear_data(user=Depends(get_current_user)):
         await db.sessions.delete_many({"team_id": team["id"]})
         await db.athletes.delete_many({"team_id": team["id"]})
         await db.injuries.delete_many({"team_id": team["id"]})
+        await db.planned_sessions.delete_many({"team_id": team["id"]})
         await db.teams.delete_one({"id": team["id"]})
     return {"ok": True}
 
@@ -928,7 +1266,7 @@ async def clear_data(user=Depends(get_current_user)):
 async def reset_all(user=Depends(get_current_user)):
     """Same as clear_data but explicit endpoint name for the 'reset total' button."""
     team = await db.teams.find_one({"user_id": user["id"]})
-    counts = {"team": 0, "athletes": 0, "sessions": 0, "injuries": 0}
+    counts = {"team": 0, "athletes": 0, "sessions": 0, "injuries": 0, "planned": 0}
     if team:
         async for a in db.athletes.find({"team_id": team["id"]}):
             if a.get("photo_path"):
@@ -939,12 +1277,14 @@ async def reset_all(user=Depends(get_current_user)):
         r1 = await db.sessions.delete_many({"team_id": team["id"]})
         r2 = await db.athletes.delete_many({"team_id": team["id"]})
         r3 = await db.injuries.delete_many({"team_id": team["id"]})
+        r4 = await db.planned_sessions.delete_many({"team_id": team["id"]})
         await db.teams.delete_one({"id": team["id"]})
         counts = {
             "team": 1,
             "athletes": r2.deleted_count,
             "sessions": r1.deleted_count,
             "injuries": r3.deleted_count,
+            "planned": r4.deleted_count,
         }
     return {"ok": True, "deleted": counts}
 
@@ -956,6 +1296,8 @@ async def on_startup():
     await db.teams.create_index("user_id")
     await db.athletes.create_index("team_id")
     await db.sessions.create_index([("athlete_id", 1), ("date", -1)])
+    await db.planned_sessions.create_index([("team_id", 1), ("date", 1)])
+    await db.injuries.create_index([("team_id", 1), ("athlete_id", 1)])
 
     # seed admin
     admin_email = os.environ.get("ADMIN_EMAIL", "treinador@futsal.pt").lower()

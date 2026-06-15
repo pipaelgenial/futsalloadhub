@@ -1,12 +1,13 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { LayoutDashboard, Users, ClipboardEdit, Building2, LogOut, Activity, CalendarRange, GitCompareArrows } from "lucide-react";
+import { LayoutDashboard, Users, ClipboardEdit, Building2, LogOut, Activity, CalendarRange, GitCompareArrows, CalendarDays } from "lucide-react";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testid: "nav-dashboard" },
   { to: "/equipa", label: "Equipa", icon: Building2, testid: "nav-team" },
   { to: "/atletas", label: "Atletas", icon: Users, testid: "nav-athletes" },
   { to: "/registar-sessao", label: "Registar Sessão", icon: ClipboardEdit, testid: "nav-log" },
+  { to: "/calendario", label: "Calendário", icon: CalendarDays, testid: "nav-calendar" },
   { to: "/resumo-mensal", label: "Resumo Mensal", icon: CalendarRange, testid: "nav-monthly" },
   { to: "/comparar", label: "Comparar", icon: GitCompareArrows, testid: "nav-compare" },
 ];

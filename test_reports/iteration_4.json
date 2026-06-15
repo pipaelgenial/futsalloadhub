@@ -1,0 +1,61 @@
+{
+  "summary": "Phase 4 testing complete. Validated all 6 new dashboard metric cards (avg_sleep, avg_monotony with zone color border), team-monotony-alert with descriptive message, detail-selector dropdown defaulting to 'Equipa (Visão Geral)' with switching to individual athletes, /calendario page with 28-day grid + planned-session create flow, and Monthly Summary team-overview default option. Backend: 8/8 Phase 4 tests pass (team summary new fields, team-detailed series[60], monthly team overview, /calendar 28-day structure, planned-sessions CRUD, seed/demo returns planned:5, reset-all returns deleted.planned).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Calendar /calendario", "issues": ["Heatmap background uses very low alpha (rgba 0.08–0.25). On dark theme low-load cells (<800) are nearly invisible. Consider raising minimum alpha for the lowest tier or adding a thin border for any cell with load>0 so users can distinguish 'training day' vs 'rest day' at a glance."]},
+    {"screen": "Dashboard ACWR chart", "issues": ["Recharts emits multiple 'width(-1) height(-1) of chart should be greater than 0' warnings during initial mount and on detail-selector change. Not a functional bug but spams console. Fix by giving ResponsiveContainer a defined height or wrap chart re-mount in a useEffect tied to data availability."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase4_features.py",
+    "/app/test_reports/pytest/phase4_results.xml"
+  ],
+  "action_items": [
+    "Minor: address Recharts 'width(-1) height(-1)' console warnings on Dashboard + MonthlySummary (cosmetic).",
+    "Minor: raise heatmap alpha on Calendar lowest-load tier so 'training day' is visible on dark bg.",
+    "Already raised in iteration 3 but still relevant: server.py is now ~1340 lines, well past the 700-line guideline — consider splitting into routers (planned.py, calendar.py, analytics.py, photos.py, auth.py)."
+  ],
+  "critical_code_review_comments": [
+    "server.py grew from 998 → 1340 lines in this iteration. Strongly recommend extracting routers; testing & code review getting harder.",
+    "/api/analytics/monthly/team/overview duplicates a lot of code from /api/analytics/monthly/{athlete_id} (month-key generation, delta calc, evolution logic ~30 lines duplicated). Extract a helper aggregate_by_month(sessions, months) -> list, then call from both endpoints.",
+    "Calendar.jsx loadColor() thresholds (800/2500/4500/7000) are hardcoded. Suggest moving to a shared constants module so dashboard tooltip + calendar use the same banded definition (single source of truth).",
+    "Dashboard 'Equipa (Visão Geral)' selection in detail-selector uses sentinel value '__team__'. Document this convention or use null/empty-string consistently across MonthlySummary + Dashboard. Both currently use '__team__' which is OK but undocumented.",
+    "POST /api/planned-sessions accepts athlete_ids array but does not validate that each id belongs to the user's team — a malicious user could attach another team's athlete IDs. Add an existence/ownership check before insert.",
+    "GET /api/calendar takes free-text 'start' param; passing an invalid date string is not validated — relying on downstream date.fromisoformat raises a 500. Add a Pydantic query model or try/except returning 400."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase4_features.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8 phase4 tests)",
+    "frontend": "100% on critical flows tested"
+  },
+  "test_credentials": "treinador@futsal.pt / treinador123 (also present in /app/memory/test_credentials.md — file not checked this iteration since auth has been verified in earlier iterations)",
+  "seed_data_creation": "TestSeedAndReset.test_reset_all_returns_planned_deleted finishes by re-seeding /api/seed/demo so UI demos work. Demo seed produces 5 planned sessions in next ~10 days as expected (verified via test_seed_returns_planned_count).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 4 verified end-to-end. Backend tests in /app/backend/tests/test_phase4_features.py (8 tests; class-scoped fixture re-seeds demo at start). Frontend Playwright run confirmed: Dashboard /  → 6 metric cards with values (Atletas 8, Aguda 1751.9, Crónica 2029.1, Sono 3.46, Monotonia 0.87, 8/8 sufficient), team-monotony-alert showing 'Monotonia da Equipa 0.87 — Boa variação...', detail-selector with 9 options ('__team__' default + 8 athletes), switching updates detail-metrics-row (team: ACWR 0.86 Mono 1.05; athlete João: ACWR 0.78 Mono 0.74). Calendar /calendario: 28 cal-day cells, cal-prev/today/next/plan-btn all OK, clicking cell opens day-detail, plan-form opens with date/rpe/duration/notes/submit, submitting creates planned session (verified text 'rpe×duration' on future day cell). Monthly /resumo-mensal: monthly-athlete-select first option '__team__' selected, monthly-team-label shows 'A analisar dados agregados de 8 atletas.', switching to João hides team-label and renders individual chart+table.",
+  "tested_features": {
+    "backend_team_summary_avg_sleep_avg_monotony": "PASS — summary contains avg_sleep, avg_monotony (float), avg_monotony_zone in (high_variation|ideal|moderate_high|critical|no_data).",
+    "backend_team_detailed_series_60": "PASS — returns {team, metrics, series[60], n_athletes}; series entries have date/load/acute/chronic/acwr; metrics has sufficient_data + acwr_zone + monotony_zone + strain_zone.",
+    "backend_monthly_team_overview": "PASS — returns {team, athletes_count, months[6], evolution, evolution_pct}; each month has total_load/sessions/avg_load/avg_sleep.",
+    "backend_calendar_28_days": "PASS — returns {team, start, end, days[28], athletes}; each day has date/weekday/total_load/athletes_count/athletes/planned.",
+    "backend_calendar_includes_planned": "PASS — after seed/demo, ≥5 planned sessions appear within 28-day window.",
+    "backend_planned_crud": "PASS — POST creates, planned_load = rpe*duration; GET ?start=&end= filters correctly; DELETE removes; subsequent list omits the deleted id.",
+    "backend_seed_demo_planned_count": "PASS — POST /api/seed/demo returns planned:5.",
+    "backend_reset_all_planned": "PASS — deleted.planned ≥ 5 after reset.",
+    "frontend_dashboard_6_metric_cards": "PASS — Atletas 8, Carga Aguda 1751.9 UA, Crónica 2029.1 UA, Sono 3.46/5, Monotonia 0.87, 8/8.",
+    "frontend_team_monotony_alert": "PASS — text 'Monotonia da Equipa 0.87 — Boa variação — Boa variação entre sessões — adaptação física favorecida.'",
+    "frontend_detail_selector_default_team": "PASS — first option = '__team__' Equipa (Visão Geral), selected:true; detail-metrics-row visible with team aggregates.",
+    "frontend_detail_selector_switch_athlete": "PASS — selecting an athlete updates detail-metrics-row text (different ACWR/Monotonia/Strain values).",
+    "frontend_calendar_route_grid": "PASS — /calendario shows calendar-grid with 28 cells; cal-prev/today/next/plan-btn visible.",
+    "frontend_calendar_day_detail": "PASS — clicking a cal-day cell opens day-detail panel.",
+    "frontend_calendar_plan_form_submit": "PASS — cal-plan-btn opens plan-form; filling date/rpe=6/duration=60/notes + plan-submit creates a session; future cal-day-{date} shows the new badge.",
+    "frontend_monthly_team_overview_default": "PASS — monthly-athlete-select first option '__team__' is selected; monthly-team-label visible with text 'A analisar dados agregados de 8 atletas.'",
+    "frontend_monthly_switch_to_athlete": "PASS — selecting an athlete hides monthly-team-label and renders chart + 'Detalhe por mês' table for that athlete."
+  },
+  "rca_of_the_issue": "No bugs found in this iteration. Two cosmetic notes: (1) Recharts width(-1) console warnings appear because ResponsiveContainer briefly measures 0×0 on initial mount and when re-mounting after detail-selector change — purely cosmetic, charts render correctly afterwards. (2) Calendar heatmap on lowest-load tier (<800) uses rgba(204,255,0,0.08) which is hard to see on the dark theme; cells DO get an inline style background, but the alpha is too low to be visually distinguishable in low-load weeks."
+}

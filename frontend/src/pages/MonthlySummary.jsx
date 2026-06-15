@@ -14,9 +14,11 @@ const formatMonth = (k) => {
   return `${MONTH_NAMES[Number(m) - 1]}/${y.slice(2)}`;
 };
 
+const TEAM_SELECTION = "__team__";
+
 export default function MonthlySummary() {
   const [athletes, setAthletes] = useState([]);
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(TEAM_SELECTION);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -25,7 +27,6 @@ export default function MonthlySummary() {
       try {
         const { data } = await http.get("/athletes");
         setAthletes(data);
-        if (data[0]) setSelected(data[0].id);
       } catch (err) { toast.error(formatApiError(err)); }
     })();
   }, []);
@@ -35,8 +36,16 @@ export default function MonthlySummary() {
     (async () => {
       setLoading(true);
       try {
-        const { data } = await http.get(`/analytics/monthly/${selected}?months=6`);
-        setData(data);
+        const url = selected === TEAM_SELECTION
+          ? "/analytics/monthly/team/overview?months=6"
+          : `/analytics/monthly/${selected}?months=6`;
+        const { data } = await http.get(url);
+        // normalize: team endpoint has no `athlete`
+        if (selected === TEAM_SELECTION) {
+          setData({ ...data, label: `${data.team?.name || "Equipa"} (Equipa)`, isTeam: true });
+        } else {
+          setData({ ...data, label: data.athlete?.name, isTeam: false });
+        }
       } catch (err) { toast.error(formatApiError(err)); }
       finally { setLoading(false); }
     })();
@@ -69,17 +78,26 @@ export default function MonthlySummary() {
           onChange={(e) => setSelected(e.target.value)}
           data-testid="monthly-athlete-select"
         >
-          {athletes.length === 0 && <option value="">— Sem atletas —</option>}
-          {athletes.map((a) => (
-            <option key={a.id} value={a.id}>{a.name} {a.jersey_number ? `#${a.jersey_number}` : ""}</option>
-          ))}
+          <option value={TEAM_SELECTION}>Equipa (Visão Geral)</option>
+          <optgroup label="Atletas">
+            {athletes.length === 0 && <option disabled>— Sem atletas —</option>}
+            {athletes.map((a) => (
+              <option key={a.id} value={a.id}>{a.name} {a.jersey_number ? `#${a.jersey_number}` : ""}</option>
+            ))}
+          </optgroup>
         </select>
       </div>
 
+      {data?.isTeam && (
+        <div className="text-sm text-[#A3A3A3]" data-testid="monthly-team-label">
+          A analisar dados agregados de <span className="text-white font-semibold">{data.athletes_count}</span> atletas.
+        </div>
+      )}
+
       {!selected && (
         <div className="fld-card text-center py-16">
-          <div className="font-head text-2xl">SEM ATLETAS</div>
-          <p className="text-[#A3A3A3] text-sm mt-2">Adicione atletas para ver o resumo mensal.</p>
+          <div className="font-head text-2xl">SELECIONE UMA OPÇÃO</div>
+          <p className="text-[#A3A3A3] text-sm mt-2">Escolha a equipa ou um atleta para ver o resumo mensal.</p>
         </div>
       )}
 

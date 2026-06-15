@@ -65,3 +65,44 @@ export function MetricCard({ label, value, unit, accent = false, testid, zoneCol
     </div>
   );
 }
+
+export const MONOTONY_ZONES = {
+  high_variation: { label: "Boa variação", color: "#00E676", message: "Boa variação entre sessões — adaptação física favorecida." },
+  ideal: { label: "Ideal", color: "#00E676", message: "Monotonia em zona ideal (1.0–1.5) — cargas bem distribuídas." },
+  moderate_high: { label: "Moderada-Alta", color: "#FFEA00", message: "Monotonia moderada-alta (1.5–2.0) — treinos pouco variados, intercalar intensidades." },
+  critical: { label: "Crítica", color: "#FF3B30", message: "Monotonia crítica (>2.0) — risco elevado de overtraining e lesão. Introduzir sessões de baixa intensidade." },
+  no_data: { label: "Sem dados", color: "#A3A3A3", message: "Sem dados suficientes." },
+};
+
+export function MonotonyAlert({ value, zone, compact = false, testid }) {
+  const meta = MONOTONY_ZONES[zone] || MONOTONY_ZONES.no_data;
+  if (compact) {
+    return (
+      <div
+        className="flex items-center gap-2 text-xs"
+        style={{ color: meta.color }}
+        data-testid={testid}
+      >
+        <span className="w-2 h-2 rounded-full inline-block" style={{ background: meta.color }} />
+        <span className="font-head uppercase tracking-widest">{meta.label}</span>
+        {value > 0 && <span className="metric-num text-white">{value}</span>}
+      </div>
+    );
+  }
+  return (
+    <div
+      className="fld-card flex items-start gap-4"
+      style={{ borderLeft: `4px solid ${meta.color}` }}
+      data-testid={testid}
+    >
+      <div>
+        <div className="fld-label">Monotonia da Equipa</div>
+        <div className="flex items-baseline gap-3 mt-1">
+          <div className="metric-num text-4xl" style={{ color: meta.color }}>{value || "—"}</div>
+          <div className="font-head text-base uppercase tracking-widest" style={{ color: meta.color }}>{meta.label}</div>
+        </div>
+        <p className="text-xs text-[#A3A3A3] mt-2 max-w-md">{meta.message}</p>
+      </div>
+    </div>
+  );
+}

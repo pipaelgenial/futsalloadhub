@@ -10,6 +10,7 @@ import LogSession from "@/pages/LogSession";
 import AthleteDetail from "@/pages/AthleteDetail";
 import MonthlySummary from "@/pages/MonthlySummary";
 import Compare from "@/pages/Compare";
+import CalendarPage from "@/pages/Calendar";
 import AppShell from "@/components/AppShell";
 import "@/index.css";
 
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="/registar-sessao" element={<Protected><LogSession /></Protected>} />
           <Route path="/resumo-mensal" element={<Protected><MonthlySummary /></Protected>} />
           <Route path="/comparar" element={<Protected><Compare /></Protected>} />
+          <Route path="/calendario" element={<Protected><CalendarPage /></Protected>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
