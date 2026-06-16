@@ -72,7 +72,18 @@ e estilo dashboard.
 - **Vista Detalhada do Dashboard** com cores de zona em ACWR, Monotonia e Strain (verde=ideal, amarelo=alerta, vermelho=crítico) + etiqueta da zona ("Zona Ótima", "Mod-Alta", "Extremo", etc.)
 - Edição inline de sessões agora também permite alterar o tipo
 
-## Phase 6 — Deferred
+## Phase 6 — Implemented (16 Fev 2026)
+- **Tipografia responsiva**: H1 reduzido para `text-3xl sm:text-4xl md:text-5xl` e métricas para `text-2xl sm:text-3xl md:text-4xl` para boa legibilidade em mobile/tablet/desktop
+- **Dashboard reorganizado**: removidos os 7 cards de métricas do topo; Vista Detalhada da Equipa aparece em primeiro lugar; alertas e tabela depois
+- **Visão Geral da Equipa coloreada**: ACWR/Monotonia/Strain pintados conforme zona (verde/amarelo/vermelho)
+- **Calendário mensal**: dropdown para escolher mês + selector de span (1/2/3/6 meses); dias fora do mês ficam atenuados; navegação `< / >` agora salta de mês em mês
+- **Descritivos no Registo Diário**:
+  - PSE (RPE) 1-10 com botões coloridos e texto descritivo por valor (Muito Leve → Esforço Máximo)
+  - Qualidade do Sono 1-5 com descritivo (Muito Mau → Excelente)
+  - Bem-Estar 1-10 com descritivo por valor (Esgotamento profundo → Energia radiante)
+- Todos os pickers atualizam o texto descritivo em tempo real
+
+## Phase 7 — Deferred
 ### P0
 - **Resumo Mensal Automático**: para cada atleta, média de carga e qualidade do sono
   por mês, com destaque de evolução (delta vs. mês anterior)
