@@ -69,7 +69,7 @@ export default function MonthlySummary() {
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
           <div className="text-xs text-[#CCFF00] tracking-[0.3em] uppercase mb-2">Análise Mensal</div>
-          <h1 className="font-head text-5xl md:text-6xl font-black leading-none">RESUMO MENSAL</h1>
+          <h1 className="font-head text-3xl sm:text-4xl md:text-5xl font-black leading-none">RESUMO MENSAL</h1>
           <p className="text-[#A3A3A3] text-sm mt-2">Média de carga e qualidade do sono · Evolução vs. mês anterior</p>
         </div>
         <select

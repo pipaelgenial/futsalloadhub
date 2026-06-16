@@ -58,9 +58,9 @@ export function MetricCard({ label, value, unit, accent = false, testid, zoneCol
         <div className="absolute top-0 left-0 w-1 h-full" style={{ background: zoneCol }} />
       )}
       <div className="fld-label">{label}</div>
-      <div className={`metric-num text-4xl md:text-5xl ${accent ? "text-[#CCFF00]" : "text-white"}`}>
+      <div className={`metric-num text-2xl sm:text-3xl md:text-4xl ${accent ? "text-[#CCFF00]" : "text-white"}`}>
         {value}
-        {unit && <span className="text-base text-[#A3A3A3] ml-1 font-sans font-medium">{unit}</span>}
+        {unit && <span className="text-xs sm:text-sm text-[#A3A3A3] ml-1 font-sans font-medium">{unit}</span>}
       </div>
     </div>
   );

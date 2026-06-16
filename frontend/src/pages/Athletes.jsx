@@ -53,7 +53,7 @@ export default function Athletes() {
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
           <div className="text-xs text-[#CCFF00] tracking-[0.3em] uppercase mb-2">Plantel</div>
-          <h1 className="font-head text-5xl md:text-6xl font-black leading-none">ATLETAS</h1>
+          <h1 className="font-head text-3xl sm:text-4xl md:text-5xl font-black leading-none">ATLETAS</h1>
         </div>
         <button className="fld-btn-primary flex items-center gap-2" onClick={() => setOpen(!open)} data-testid="add-athlete-btn">
           <Plus className="w-4 h-4" /> {open ? "FECHAR" : "ADICIONAR"}

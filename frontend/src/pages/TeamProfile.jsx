@@ -40,7 +40,7 @@ export default function TeamProfile() {
     <div className="space-y-8">
       <div>
         <div className="text-xs text-[#CCFF00] tracking-[0.3em] uppercase mb-2">Perfil</div>
-        <h1 className="font-head text-5xl md:text-6xl font-black leading-none">EQUIPA</h1>
+        <h1 className="font-head text-3xl sm:text-4xl md:text-5xl font-black leading-none">EQUIPA</h1>
       </div>
 
       {!team && (

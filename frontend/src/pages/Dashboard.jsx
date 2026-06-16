@@ -101,7 +101,7 @@ export default function Dashboard() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="text-xs text-[#CCFF00] tracking-[0.3em] uppercase mb-2">Painel Principal</div>
-          <h1 className="font-head text-5xl md:text-6xl font-black leading-none">DASHBOARD</h1>
+          <h1 className="font-head text-3xl sm:text-4xl md:text-5xl font-black leading-none">DASHBOARD</h1>
           {data?.team && (
             <div className="mt-3 text-[#A3A3A3] text-sm">
               <span className="text-white font-semibold">{data.team.name}</span> · {data.team.escalao} · Época {data.team.epoca}
@@ -142,65 +142,6 @@ export default function Dashboard() {
 
       {data?.team && (data.athletes || []).length > 0 && (
         <>
-          {/* Team metrics */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
-            <MetricCard label="Atletas" value={data.summary.athletes_count} testid="metric-athletes" />
-            <MetricCard label="Carga Aguda Média" value={data.summary.avg_acute} unit="UA" testid="metric-avg-acute" />
-            <MetricCard label="Carga Crónica Média" value={data.summary.avg_chronic} unit="UA" accent testid="metric-avg-chronic" />
-            <MetricCard label="Sono Médio" value={data.summary.avg_sleep || "—"} unit="/5" testid="metric-avg-sleep" />
-            <MetricCard label="Bem-Estar Médio" value={data.summary.avg_wellness || "—"} unit="/10" testid="metric-avg-wellness" />
-            <MetricCard label="Monotonia Média" value={data.summary.avg_monotony || "—"} testid="metric-avg-monotony" zoneCol={data.summary.avg_monotony ? (data.summary.avg_monotony_zone === "critical" ? "#FF3B30" : data.summary.avg_monotony_zone === "moderate_high" ? "#FFEA00" : "#00E676") : null} />
-            <MetricCard label="C/ Dados Suficientes" value={`${data.summary.athletes_with_sufficient_data}/${data.summary.athletes_count}`} testid="metric-sufficient" />
-          </div>
-
-          {/* Team-wide monotony alert */}
-          {data.summary.avg_monotony > 0 && (
-            <MonotonyAlert
-              value={data.summary.avg_monotony}
-              zone={data.summary.avg_monotony_zone}
-              testid="team-monotony-alert"
-            />
-          )}
-
-          {/* Risk Alerts */}
-          {(() => {
-            const danger = data.athletes.filter((a) => a.metrics.risk === "danger");
-            const warning = data.athletes.filter((a) => a.metrics.risk === "warning");
-            if (!danger.length && !warning.length) return null;
-            return (
-              <div className="fld-card border-l-4 border-l-[#FF3B30]" data-testid="alerts-panel">
-                <div className="flex items-center gap-3 mb-4">
-                  <AlertTriangle className="w-5 h-5 text-[#FF3B30]" />
-                  <div className="font-head text-xl font-bold tracking-tight">ALERTAS DE RISCO</div>
-                </div>
-                <div className="grid md:grid-cols-2 gap-3">
-                  {[...danger, ...warning].map((a) => (
-                    <Link key={a.id} to={`/atletas/${a.id}`} className="flex items-start gap-3 p-3 border border-white/5 hover:border-white/20 transition-colors" data-testid={`alert-row-${a.id}`}>
-                      <PlayerAvatar athlete={a} size={48} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap mb-1">
-                          <div className="font-semibold">{a.name}</div>
-                          <RiskBadge risk={a.metrics.risk} />
-                        </div>
-                        <div className="text-xs text-[#A3A3A3] mb-1">
-                          ACWR <span className="metric-num text-white">{a.metrics.acwr}</span>
-                          {" · "}Mono <span className="metric-num text-white">{a.metrics.monotony || "—"}</span>
-                          {" · "}Strain <span className="metric-num text-white">{a.metrics.strain || "—"}</span>
-                        </div>
-                        {a.metrics.risk_description && (
-                          <div className="text-xs text-[#FFEA00]/80 leading-snug" data-testid={`alert-desc-${a.id}`}>
-                            {a.metrics.risk_description}
-                          </div>
-                        )}
-                      </div>
-                      <ArrowRight className="w-4 h-4 text-[#525252] mt-2 flex-shrink-0" />
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-
           {/* ACWR chart with selector */}
           <div className="fld-card" data-testid="acwr-chart-panel">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
@@ -304,6 +245,54 @@ export default function Dashboard() {
             )}
           </div>
 
+          {/* Team-wide monotony alert */}
+          {data.summary.avg_monotony > 0 && (
+            <MonotonyAlert
+              value={data.summary.avg_monotony}
+              zone={data.summary.avg_monotony_zone}
+              testid="team-monotony-alert"
+            />
+          )}
+
+          {/* Risk Alerts */}
+          {(() => {
+            const danger = data.athletes.filter((a) => a.metrics.risk === "danger");
+            const warning = data.athletes.filter((a) => a.metrics.risk === "warning");
+            if (!danger.length && !warning.length) return null;
+            return (
+              <div className="fld-card border-l-4 border-l-[#FF3B30]" data-testid="alerts-panel">
+                <div className="flex items-center gap-3 mb-4">
+                  <AlertTriangle className="w-5 h-5 text-[#FF3B30]" />
+                  <div className="font-head text-lg md:text-xl font-bold tracking-tight">ALERTAS DE RISCO</div>
+                </div>
+                <div className="grid md:grid-cols-2 gap-3">
+                  {[...danger, ...warning].map((a) => (
+                    <Link key={a.id} to={`/atletas/${a.id}`} className="flex items-start gap-3 p-3 border border-white/5 hover:border-white/20 transition-colors" data-testid={`alert-row-${a.id}`}>
+                      <PlayerAvatar athlete={a} size={48} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <div className="font-semibold text-sm">{a.name}</div>
+                          <RiskBadge risk={a.metrics.risk} />
+                        </div>
+                        <div className="text-xs text-[#A3A3A3] mb-1">
+                          ACWR <span className="metric-num text-white">{a.metrics.acwr}</span>
+                          {" · "}Mono <span className="metric-num text-white">{a.metrics.monotony || "—"}</span>
+                          {" · "}Strain <span className="metric-num text-white">{a.metrics.strain || "—"}</span>
+                        </div>
+                        {a.metrics.risk_description && (
+                          <div className="text-xs text-[#FFEA00]/80 leading-snug" data-testid={`alert-desc-${a.id}`}>
+                            {a.metrics.risk_description}
+                          </div>
+                        )}
+                      </div>
+                      <ArrowRight className="w-4 h-4 text-[#525252] mt-2 flex-shrink-0" />
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Athletes table */}
           <div className="fld-card" data-testid="athletes-overview">
             <div className="flex items-center justify-between mb-4">
@@ -325,23 +314,42 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.athletes.map((a) => (
-                    <tr key={a.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                      <td className="py-3 pr-4">
-                        <Link to={`/atletas/${a.id}`} className="hover:text-[#CCFF00]" data-testid={`athlete-row-${a.id}`}>
-                          {a.name}
-                          <span className="text-[#525252] text-xs ml-2">{a.position}</span>
-                        </Link>
-                      </td>
-                      <td className="py-3 px-2 metric-num">{a.metrics.acute}</td>
-                      <td className="py-3 px-2 metric-num">{a.metrics.chronic}</td>
-                      <td className="py-3 px-2 metric-num text-[#CCFF00]">{a.metrics.sufficient_data ? a.metrics.acwr : "—"}</td>
-                      <td className="py-3 px-2 metric-num">{a.metrics.monotony || "—"}</td>
-                      <td className="py-3 px-2 metric-num">{a.metrics.strain || "—"}</td>
-                      <td className="py-3 px-2">{a.metrics.total_sessions}</td>
-                      <td className="py-3 px-2"><RiskBadge risk={a.metrics.risk} /></td>
-                    </tr>
-                  ))}
+                  {data.athletes.map((a) => {
+                    const m = a.metrics;
+                    const acwrColor = m.sufficient_data
+                      ? (m.acwr_zone === "sweet_spot" ? "#00E676"
+                        : m.acwr_zone === "high_risk" ? "#FF3B30"
+                        : m.acwr_zone === "alert" || m.acwr_zone === "detraining" ? "#FFEA00"
+                        : "#CCFF00")
+                      : "#525252";
+                    const monoColor = m.monotony
+                      ? (m.monotony_zone === "ideal" || m.monotony_zone === "high_variation" ? "#00E676"
+                        : m.monotony_zone === "moderate_high" ? "#FFEA00"
+                        : m.monotony_zone === "critical" ? "#FF3B30" : "#fff")
+                      : "#525252";
+                    const strainColor = m.strain
+                      ? (m.strain_zone === "moderate" ? "#00E676"
+                        : m.strain_zone === "elevated" ? "#FFEA00"
+                        : m.strain_zone === "extreme" ? "#FF3B30" : "#fff")
+                      : "#525252";
+                    return (
+                      <tr key={a.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                        <td className="py-3 pr-4">
+                          <Link to={`/atletas/${a.id}`} className="hover:text-[#CCFF00]" data-testid={`athlete-row-${a.id}`}>
+                            {a.name}
+                            <span className="text-[#525252] text-xs ml-2 hidden sm:inline">{a.position}</span>
+                          </Link>
+                        </td>
+                        <td className="py-3 px-2 metric-num">{m.acute}</td>
+                        <td className="py-3 px-2 metric-num">{m.chronic}</td>
+                        <td className="py-3 px-2 metric-num font-bold" style={{ color: acwrColor }} data-testid={`row-acwr-${a.id}`}>{m.sufficient_data ? m.acwr : "—"}</td>
+                        <td className="py-3 px-2 metric-num font-bold" style={{ color: monoColor }} data-testid={`row-monotony-${a.id}`}>{m.monotony || "—"}</td>
+                        <td className="py-3 px-2 metric-num font-bold" style={{ color: strainColor }} data-testid={`row-strain-${a.id}`}>{m.strain || "—"}</td>
+                        <td className="py-3 px-2">{m.total_sessions}</td>
+                        <td className="py-3 px-2"><RiskBadge risk={m.risk} /></td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

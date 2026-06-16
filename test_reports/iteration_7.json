@@ -1,0 +1,60 @@
+{
+  "summary": "Phase 7 frontend verification complete. All 5 feature areas validated end-to-end via Playwright after login as treinador@futsal.pt. Dashboard now opens with Vista Detalhada (acwr-chart-panel) as the first content block — the 7 metric-card top grid is gone (0 metric-card-* nodes above the chart panel). DOM order confirmed: acwr-chart-panel (y=168) → team-monotony-alert (y=734) → alerts-panel (y=906) → athletes-overview (y=1334). The 'Visão Geral da Equipa' table renders 8 rows with data-testid row-acwr-{id}, row-monotony-{id}, row-strain-{id}, each inline-styled with the correct zone color (sweet_spot/ideal/high_variation/moderate→#00E676 green; alert/detraining/moderate_high/elevated→#FFEA00 yellow; high_risk/critical/extreme→#FF3B30 red). Calendar default span=1 renders 1 month-grid; selecting span=2/3/6 stacks 2/3/6 month-grid-{Y}-{M} containers; cal-prev/cal-next shift by 1 month (verified 2026-5↔2026-6); cal-today resets to current month; cells outside the current month are dimmed and disabled (5 disabled cells / 35 total in the default May 2026 grid). PLANEAR button and plan-form removed; no body text contains 'PLANEAR'. LogSession: 10 rpe-{1..10} buttons render with color gradient; rpe-label/sleep-label/wellness-label all present and update LIVE as the user clicks (verified rpe-5→'Difícil', rpe-10→'Esforço Máximo', sleep-3→'Razoável', sleep-5→'Excelente', wellness-7→'Equilíbrio bom, corpo relaxado', wellness-9→'Vitalidade plena'). H1 font size 48px on desktop (text-5xl at md breakpoint, smaller on sm/mobile via responsive classes).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard ACWR chart", "issues": ["Carryover from iter 4-6: Recharts width(-1)/height(-1) console warnings on initial mount. Cosmetic only — chart still renders correctly. Recommend giving ResponsiveContainer a minHeight or guarding render until data is ready."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase6_features.py (prior iteration's regression suite, no backend changes in P7)"
+  ],
+  "action_items": [
+    "(Carryover) Eliminate Recharts width(-1)/height(-1) console warnings on Dashboard and WeeklySummary.",
+    "(Carryover) Split server.py (~1651 lines) into routers (analytics_weekly, sessions, photos, calendar) — hard guideline is 700 lines.",
+    "(Carryover) Backend still exposes /api/planned-sessions endpoints though no UI consumes them — remove or document as deprecated.",
+    "Minor refactor: the per-zone color/label ternaries in Dashboard.jsx Vista Detalhada (lines 185–214) and table cells (lines 319–334) duplicate logic and could share a helper like zoneCellStyle(metric, zone). The zoneColor helper already exists in Bits.jsx."
+  ],
+  "critical_code_review_comments": [
+    "Color/label mapping for ACWR/Monotonia/Strain zones is duplicated in 4+ places: detail-acwr/detail-monotony/detail-strain inline ternaries in Dashboard.jsx, the table row color computations (acwrColor/monoColor/strainColor), and Bits.jsx zoneColor. Centralise into one helper (e.g. /lib/zones.js exporting zoneColor(metric, zone) and zoneLabel(metric, zone)).",
+    "Calendar.jsx still receives the 'planned' array from /api/calendar on each day but never renders it — dead field over the wire. Either trim the response or stop relying on it client-side.",
+    "LogSession.jsx RPE/SLEEP/WELLNESS label maps are inline literals that should live next to the rpeColor/sleepColor/wellnessColor helpers (already nearby) but could move to a shared /lib/labels.js to be reused on the AthleteDetail / WeeklySummary tooltips.",
+    "Dashboard.jsx is 362 lines and contains the long color ternary chains noted above — extract the Vista Detalhada metrics row and the athletes table into their own components to keep the page <250 lines.",
+    "server.py remains ~1651 lines (no changes this iteration) — refactor is overdue (see prior iterations)."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "skipped (no backend changes per request)",
+    "frontend": "100% on Phase 7 flows (5/5 feature areas verified)"
+  },
+  "test_credentials": "treinador@futsal.pt / treinador123 (verified)",
+  "seed_data_creation": "Used existing seed from prior iteration — 8 athletes visible in the table, ACWR/monotony/strain populated.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 7 verified end-to-end (frontend only). Dashboard: metric grid removed, Vista Detalhada is first content card, athletes table has row-acwr-{id}/row-monotony-{id}/row-strain-{id} with zone colors set via inline style.color. Calendar: rewritten to monthly view; data-testid=month-selector (format `${year}-${monthIdx}` where monthIdx is 0-based), data-testid=span-selector (values 1/2/3/6), data-testid=month-grid-{Y}-{M} (M is 1-based), data-testid=cal-day-{YYYY-MM-DD}; cal-prev/cal-next shift by 1 month; outside-month cells are disabled. LogSession: rpe-1..rpe-10 (was previously a 5-button group), rpe-label/sleep-label/wellness-label all update on click. No backend API changes. /api/calendar still works with arbitrary days (used days=180 implicitly for span=6).",
+  "tested_features": {
+    "dashboard_no_top_metric_grid": "PASS — 0 metric-card-* nodes positioned above acwr-chart-panel.",
+    "dashboard_vista_detalhada_first": "PASS — acwr-chart-panel y=168, team-monotony-alert y=734, alerts-panel y=906, athletes-overview y=1334.",
+    "dashboard_table_color_coded_acwr": "PASS — 8 row-acwr-* present; sample values 1.15→green, 0.9→green, 0.64→yellow.",
+    "dashboard_table_color_coded_monotony": "PASS — 8 row-monotony-* present; sample values 0.7/0.95/0.65 all green (high_variation zone).",
+    "dashboard_table_color_coded_strain": "PASS — 8 row-strain-* present; 1897/1553/799.5 (moderate→green, white fallback for null).",
+    "dashboard_h1_responsive": "PASS — fontSize 48px (text-5xl) at desktop md breakpoint.",
+    "calendar_month_selector": "PASS — data-testid=month-selector renders months.",
+    "calendar_span_selector_default_1": "PASS — default span=1 → 1 month-grid (month-grid-2026-6).",
+    "calendar_span_2_3_6": "PASS — span=3 → 3 grids stacked; span=6 → 6 grids stacked vertically.",
+    "calendar_cal_prev_next_shift_month": "PASS — cal-next moved month from 2026-5 to 2026-6 (1-month shift).",
+    "calendar_cal_today": "PASS — cal-today resets to current month (2026-5 monthIdx = June).",
+    "calendar_day_cells": "PASS — 35 cal-day-{YYYY-MM-DD} cells with 5 disabled (outside month).",
+    "calendar_no_planear": "PASS — body text contains no 'PLANEAR'; no [data-testid=plan-form].",
+    "logsession_rpe_10_buttons": "PASS — rpe-1 through rpe-10 all present (10/10).",
+    "logsession_rpe_label_live": "PASS — clicking rpe-5 shows 'Difícil', rpe-10 shows 'Esforço Máximo'.",
+    "logsession_sleep_label_live": "PASS — sleep-3 shows 'Razoável', sleep-5 shows 'Excelente'.",
+    "logsession_wellness_label_live": "PASS — wellness-7 shows 'Equilíbrio bom, corpo relaxado', wellness-9 shows 'Vitalidade plena'."
+  },
+  "rca_of_the_issue": "No bugs found. Phase 7 changes are implemented correctly per spec. Only carryover is the cosmetic Recharts width(-1)/height(-1) console warnings noted since iteration 4."
+}

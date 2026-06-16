@@ -5,6 +5,60 @@ import { SESSION_TYPES, SESSION_TYPE_ORDER } from "@/components/Bits";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
+const RPE_LABELS = {
+  1: "Muito Leve",
+  2: "Leve",
+  3: "Confortável",
+  4: "Algo Difícil",
+  5: "Difícil",
+  6: "Bastante Difícil",
+  7: "Muito Difícil",
+  8: "Extremamente Difícil",
+  9: "Quase Máximo",
+  10: "Esforço Máximo",
+};
+
+const SLEEP_LABELS = {
+  1: "Muito Mau",
+  2: "Mau",
+  3: "Razoável",
+  4: "Bom",
+  5: "Excelente",
+};
+
+const WELLNESS_LABELS = {
+  1: "Esgotamento profundo / doença",
+  2: "Dor intensa / muito mal",
+  3: "Cansaço extremo",
+  4: "Letargia / dor desconfortável",
+  5: "Energia moderada com tensão",
+  6: "Funcional com alguma tensão",
+  7: "Equilíbrio bom, corpo relaxado",
+  8: "Mente desperta, ótima energia",
+  9: "Vitalidade plena",
+  10: "Energia radiante, sem dores",
+};
+
+function rpeColor(n) {
+  if (n <= 3) return "#00E676";
+  if (n <= 5) return "#CCFF00";
+  if (n <= 7) return "#FFEA00";
+  if (n <= 8) return "#FF9500";
+  return "#FF3B30";
+}
+function sleepColor(n) {
+  if (n <= 2) return "#FF3B30";
+  if (n === 3) return "#FFEA00";
+  return "#00E676";
+}
+function wellnessColor(n) {
+  if (n <= 2) return "#FF3B30";
+  if (n <= 4) return "#FF9500";
+  if (n <= 6) return "#FFEA00";
+  if (n <= 8) return "#00E676";
+  return "#CCFF00";
+}
+
 export default function LogSession() {
   const [athletes, setAthletes] = useState([]);
   const [form, setForm] = useState({
@@ -54,7 +108,7 @@ export default function LogSession() {
     <div className="space-y-8 max-w-3xl">
       <div>
         <div className="text-xs text-[#CCFF00] tracking-[0.3em] uppercase mb-2">Registo Diário</div>
-        <h1 className="font-head text-5xl md:text-6xl font-black leading-none">SESSÃO</h1>
+        <h1 className="font-head text-3xl sm:text-4xl md:text-5xl font-black leading-none">SESSÃO</h1>
       </div>
 
       {athletes.length === 0 ? (
@@ -107,9 +161,32 @@ export default function LogSession() {
 
           <div className="grid md:grid-cols-2 gap-5">
             <div>
-              <label className="fld-label">RPE (Esforço Percebido 1-10)</label>
-              <input className="fld-input" type="number" min="1" max="10" value={form.rpe} onChange={(e) => setForm({ ...form, rpe: e.target.value })} required data-testid="session-rpe" />
-              <div className="text-xs text-[#525252] mt-1">1 = Muito leve · 10 = Esforço máximo</div>
+              <label className="fld-label">PSE — Esforço Percebido (1-10)</label>
+              <div className="grid grid-cols-10 gap-1">
+                {[1,2,3,4,5,6,7,8,9,10].map((n) => {
+                  const color = rpeColor(n);
+                  const active = Number(form.rpe) === n;
+                  return (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setForm({ ...form, rpe: n })}
+                      data-testid={`rpe-${n}`}
+                      className="py-2.5 font-head text-sm border transition-all"
+                      style={{
+                        background: active ? color : "transparent",
+                        color: active ? "#000" : "#fff",
+                        borderColor: active ? color : "rgba(255,255,255,0.15)",
+                      }}
+                    >
+                      {n}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="text-xs mt-2 min-h-[1.2rem]" style={{ color: rpeColor(Number(form.rpe)) }} data-testid="rpe-label">
+                {RPE_LABELS[Number(form.rpe)] || "—"}
+              </div>
             </div>
             <div>
               <label className="fld-label">Duração (min)</label>
@@ -119,22 +196,30 @@ export default function LogSession() {
 
           <div>
             <label className="fld-label">Qualidade do Sono (1-5)</label>
-            <div className="flex gap-2">
-              {[1, 2, 3, 4, 5].map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => setForm({ ...form, sleep_quality: n })}
-                  data-testid={`sleep-${n}`}
-                  className={`flex-1 py-3 font-head tracking-widest text-sm border transition-colors ${
-                    form.sleep_quality === n
-                      ? "bg-[#CCFF00] text-black border-[#CCFF00]"
-                      : "bg-transparent text-white border-white/15 hover:border-white/30"
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
+            <div className="grid grid-cols-5 gap-2">
+              {[1, 2, 3, 4, 5].map((n) => {
+                const color = sleepColor(n);
+                const active = form.sleep_quality === n;
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setForm({ ...form, sleep_quality: n })}
+                    data-testid={`sleep-${n}`}
+                    className="py-3 font-head tracking-widest text-sm border transition-colors"
+                    style={{
+                      background: active ? color : "transparent",
+                      color: active ? "#000" : "#fff",
+                      borderColor: active ? color : "rgba(255,255,255,0.15)",
+                    }}
+                  >
+                    {n}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="text-xs mt-2 min-h-[1.2rem]" style={{ color: sleepColor(form.sleep_quality) }} data-testid="sleep-label">
+              {SLEEP_LABELS[form.sleep_quality] || "—"}
             </div>
           </div>
 
@@ -142,7 +227,7 @@ export default function LogSession() {
             <label className="fld-label">Bem-Estar Corporal (1-10)</label>
             <div className="grid grid-cols-10 gap-1.5">
               {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
-                const color = n <= 2 ? "#FF3B30" : n <= 4 ? "#FF9500" : n <= 6 ? "#FFEA00" : n <= 8 ? "#00E676" : "#CCFF00";
+                const color = wellnessColor(n);
                 const active = form.wellness === n;
                 return (
                   <button
@@ -162,12 +247,8 @@ export default function LogSession() {
                 );
               })}
             </div>
-            <div className="text-xs text-[#525252] mt-2 grid grid-cols-2 md:grid-cols-5 gap-1">
-              <span><span className="text-[#FF3B30]">1-2</span> Esgotamento / dor</span>
-              <span><span className="text-[#FF9500]">3-4</span> Cansaço extremo</span>
-              <span><span className="text-[#FFEA00]">5-6</span> Energia moderada</span>
-              <span><span className="text-[#00E676]">7-8</span> Equilíbrio bom</span>
-              <span><span className="text-[#CCFF00]">9-10</span> Vitalidade plena</span>
+            <div className="text-xs mt-2 min-h-[1.2rem]" style={{ color: wellnessColor(form.wellness) }} data-testid="wellness-label">
+              {WELLNESS_LABELS[form.wellness] || "—"}
             </div>
           </div>
 
