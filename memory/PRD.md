@@ -99,7 +99,15 @@ e estilo dashboard.
   Toast informativo quando não há histórico.
 - **Seed idempotente**: POST /api/seed/demo agora repõe active_team_id para a equipa seed recriada
 
-## Phase 8 — Deferred
+## Phase 8 — Notificações + Calendário per-athlete + Refinements (17 Jun 2026)
+- **Notificações in-app**: GET /api/alerts calcula on-the-fly (ACWR alto/baixo, monotonia crítica, strain extremo, sono ≤2, bem-estar ≤3, lesões abertas)
+- **NotificationsBell** no sidebar e mobile bar com badge não-vistos, dropdown com listagem, marcação 'vista' (ao abrir) e 'resolvida' (manual), reabrir, limpar histórico. Toast automático no Dashboard para alertas danger novos (throttle 5min). Estado persistido em localStorage.
+- **Calendar limiares per-athlete**: `loadTextColor(load, athletes_count)` e `loadIntensity(load, athletes_count)` usam carga média por atleta para evitar cores falsas. Limiares: <300 cinza, 300-600 lime, 600-900 amarelo, 900-1200 laranja, >1200 vermelho.
+- **Calendar modo único**: remoção do modo "Intervalo personalizado" e date pickers. Só fica modo Mês com span 1/2/3 meses.
+- **TeamSwitcher dinâmico**: refetch de `/api/teams` ao mudar de rota E ao abrir o dropdown — equipas novas/eliminadas refletem sem reload.
+- **TeamProfile sem botão ATIVAR**: trocar equipa é exclusivamente via o switcher na sidebar (UX unificada).
+
+## Phase 9 — Deferred
 ### P0
 - **Resumo Mensal Automático**: para cada atleta, média de carga e qualidade do sono
   por mês, com destaque de evolução (delta vs. mês anterior)
