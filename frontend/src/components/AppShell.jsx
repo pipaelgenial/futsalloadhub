@@ -2,6 +2,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { LayoutDashboard, Users, ClipboardEdit, Building2, LogOut, Activity, CalendarRange, GitCompareArrows, CalendarDays } from "lucide-react";
 import TeamSwitcher from "@/components/TeamSwitcher";
+import NotificationsBell from "@/components/NotificationsBell";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testid: "nav-dashboard" },
@@ -31,9 +32,12 @@ export default function AppShell({ children }) {
           </div>
         </div>
 
-        {/* Team switcher */}
-        <div className="mb-6">
-          <TeamSwitcher />
+        {/* Team switcher + notifications */}
+        <div className="mb-6 flex items-stretch gap-2">
+          <div className="flex-1 min-w-0">
+            <TeamSwitcher />
+          </div>
+          <NotificationsBell />
         </div>
 
         <nav className="flex-1 flex flex-col gap-1">
@@ -82,6 +86,7 @@ export default function AppShell({ children }) {
           <div className="flex-1 min-w-0 max-w-[260px]">
             <TeamSwitcher />
           </div>
+          <NotificationsBell testid="notifications-bell-mobile" />
           <button onClick={async () => { await logout(); navigate("/login"); }} className="text-[#A3A3A3] shrink-0" data-testid="logout-btn-mobile">
             <LogOut className="w-4 h-4" />
           </button>

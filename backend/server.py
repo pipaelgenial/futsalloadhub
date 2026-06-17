@@ -1200,6 +1200,133 @@ async def delete_injury(injury_id: str, user=Depends(get_current_user)):
     return {"ok": True}
 
 
+# ---------------------- Alerts (computed on-the-fly) ----------------------
+@api.get("/alerts")
+async def get_alerts(user=Depends(get_current_user)):
+    """Return current high-risk alerts for the active team. Computed on-the-fly.
+
+    Alert ids are stable per (type, athlete_id) so the client can mark them
+    as resolved in localStorage. When the underlying issue normalises the
+    alert simply disappears from the response.
+    """
+    team = await _get_active_team(user, required=False)
+    if not team:
+        return []
+    athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).to_list(200)
+    if not athletes:
+        return []
+
+    alerts: list[dict] = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    for a in athletes:
+        sessions = await db.sessions.find({"athlete_id": a["id"]}, {"_id": 0}).to_list(5000)
+        m = compute_metrics_for_athlete(sessions)
+        last = max(sessions, key=lambda s: s["date"]) if sessions else None
+        ath_name = a["name"]
+
+        # ---- ACWR ----
+        if m["acwr_zone"] == "high_risk":
+            alerts.append({
+                "id": f"acwr_high_{a['id']}",
+                "type": "acwr_high",
+                "severity": "danger",
+                "athlete_id": a["id"], "athlete_name": ath_name,
+                "title": "ACWR em alto risco",
+                "message": f"ACWR {m['acwr']:.2f} ≥ 1.5 — risco elevado de lesão",
+                "value": m["acwr"], "threshold": 1.5,
+                "created_at": now_iso,
+            })
+        elif m["acwr_zone"] == "detraining" and m.get("sufficient_data"):
+            alerts.append({
+                "id": f"acwr_low_{a['id']}",
+                "type": "acwr_low",
+                "severity": "warning",
+                "athlete_id": a["id"], "athlete_name": ath_name,
+                "title": "Destreinamento",
+                "message": f"ACWR {m['acwr']:.2f} < 0.8 — carga insuficiente",
+                "value": m["acwr"], "threshold": 0.8,
+                "created_at": now_iso,
+            })
+
+        # ---- Monotonia ----
+        if m["monotony_zone"] == "critical":
+            alerts.append({
+                "id": f"monotony_critical_{a['id']}",
+                "type": "monotony_critical",
+                "severity": "danger",
+                "athlete_id": a["id"], "athlete_name": ath_name,
+                "title": "Monotonia crítica",
+                "message": f"Monotonia {m['monotony']:.2f} > 2.0 — treinos sem variação",
+                "value": m["monotony"], "threshold": 2.0,
+                "created_at": now_iso,
+            })
+
+        # ---- Strain extremo ----
+        if m["strain_zone"] == "extreme":
+            alerts.append({
+                "id": f"strain_extreme_{a['id']}",
+                "type": "strain_extreme",
+                "severity": "danger",
+                "athlete_id": a["id"], "athlete_name": ath_name,
+                "title": "Strain extremo",
+                "message": f"Strain {m['strain']:.0f} > 6000 — sobrecarga semanal",
+                "value": m["strain"], "threshold": 6000,
+                "created_at": now_iso,
+            })
+
+        # ---- Última sessão: sono e bem-estar ----
+        if last:
+            sq = last.get("sleep_quality")
+            if sq is not None and sq <= 2:
+                alerts.append({
+                    "id": f"sleep_poor_{a['id']}",
+                    "type": "sleep_poor",
+                    "severity": "warning",
+                    "athlete_id": a["id"], "athlete_name": ath_name,
+                    "title": "Sono muito mau",
+                    "message": f"Última sessão ({last['date']}): qualidade do sono {sq}/5",
+                    "value": sq, "threshold": 2,
+                    "created_at": now_iso,
+                })
+            w = last.get("wellness")
+            if w is not None and w <= 3:
+                alerts.append({
+                    "id": f"wellness_low_{a['id']}",
+                    "type": "wellness_low",
+                    "severity": "warning",
+                    "athlete_id": a["id"], "athlete_name": ath_name,
+                    "title": "Bem-estar muito baixo",
+                    "message": f"Última sessão ({last['date']}): bem-estar {w}/10",
+                    "value": w, "threshold": 3,
+                    "created_at": now_iso,
+                })
+
+    # ---- Lesões abertas ----
+    injuries = await db.injuries.find({"team_id": team["id"]}, {"_id": 0}).to_list(500)
+    ath_name_map = {a["id"]: a["name"] for a in athletes}
+    for inj in injuries:
+        if inj.get("end_date"):
+            continue  # already recovered
+        ath_id = inj.get("athlete_id")
+        alerts.append({
+            "id": f"injury_open_{inj['id']}",
+            "type": "injury_open",
+            "severity": "danger" if inj.get("severity") == "high" else "warning",
+            "athlete_id": ath_id,
+            "athlete_name": ath_name_map.get(ath_id, "Atleta"),
+            "title": "Lesão em curso",
+            "message": f"{inj.get('type', 'Lesão')} — {inj.get('body_part', 'n/a')} (desde {inj.get('start_date', '')})",
+            "value": inj.get("severity", "low"),
+            "threshold": None,
+            "created_at": now_iso,
+        })
+
+    severity_order = {"danger": 0, "warning": 1, "info": 2}
+    alerts.sort(key=lambda x: (severity_order.get(x["severity"], 9), x.get("athlete_name", "")))
+    return alerts
+
+
 # ---------------------- Planned Sessions & Calendar ----------------------
 @api.get("/planned-sessions")
 async def list_planned(

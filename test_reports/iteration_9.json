@@ -1,0 +1,33 @@
+{
+  "summary": "Backend+Frontend e2e testing of in-app notifications feature (NotificationsBell + GET /api/alerts). All 10 review requirements pass. 6/6 backend tests pass. UI flows: sidebar bell, mobile bell, badge, dropdown, dashboard toast, resolve/reopen/clear-resolved, empty state, mark-as-seen via open.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_alerts.py",
+    "/app/test_reports/pytest/alerts_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "NotificationsBell tem 2 instâncias no DOM em simultâneo (sidebar + mobile-bar via AppShell.jsx). Cada uma mantém estado React separado (alerts, seen, resolved). LocalStorage é partilhado, mas a outra instância não rerenderiza após mudança até ao próximo fetch (60s) ou reload. Visualmente OK porque um é md:hidden e outro hidden md:flex — só uma é visível por viewport. Sugestão (não-bloqueador): mover fetchAlerts + estado para um contexto/hook partilhado, ou ouvir 'storage' events para sincronizar entre instâncias.",
+    "/api/alerts recomputa metrics para todos os atletas a cada chamada (loop por atleta + sessions.find). Polling de 60s × N treinadores × N atletas pode ficar caro à escala. Aceitável para MVP.",
+    "Toast no Dashboard: throttle de 5min via localStorage funciona, mas useEffect deps são [alerts.length, onDashboardMount] (a lista pode mudar sem mudar length — ex. mesmo nº de alertas mas tipos diferentes). Caso raro, mas pode falhar em notificar. Considerar comparar set de ids.",
+    "alerts.sort não tem fallback estável entre alertas do mesmo atleta+severity (mantém ordem natural do append). Aceitável."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_alerts.py (criado)"
+  ],
+  "success_rate": {"backend": "100% (6/6 pytest)", "frontend": "100% (10/10 cenários da review)"},
+  "test_credentials": "treinador@futsal.pt / treinador123 (validadas)",
+  "seed_data_creation": "Criadas e eliminadas no fim: lesão alta open (TEST_LesaoToast), lesão média open (TEST_LesaoMed), lesão fechada (TEST_LesaoFechada). Todas com DELETE /api/injuries/{id} no teardown.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Notas sobre notificações: (1) GET /api/alerts devolve [] se não houver equipa activa. IDs estáveis: acwr_high_{ath}, acwr_low_{ath}, monotony_critical_{ath}, strain_extreme_{ath}, sleep_poor_{ath}, wellness_low_{ath}, injury_open_{injury_id}. (2) Toast dashboard só dispara para severity=danger NEW (não-visto+não-resolvido). Throttle 5min via fld_alerts_dash_toast_at. Para forçar toast em testes, limpa essa chave + fld_alerts_seen e cria uma lesão high open. (3) Abrir sino marca todos os activos como seen → badge desaparece. (4) clear-resolved só remove IDs JÁ NÃO presentes em /api/alerts (preserva os que ainda estão activos — útil quando user resolve e o problema persiste). (5) Sidebar bell testid='notifications-bell'; mobile testid='notifications-bell-mobile'. Os dois renderizam mas só um é visível por viewport. (6) Demo team já tem 2 alertas acwr_low (warning) por default — útil para testes não-destructivos sem criar dados.",
+  "rca of the issue": "Sem bugs encontrados nesta iteração."
+}
