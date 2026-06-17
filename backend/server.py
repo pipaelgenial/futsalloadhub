@@ -1593,6 +1593,8 @@ async def seed_demo(user=Depends(get_current_user)):
         "epoca": "2025/2026",
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
+    # Make the freshly-seeded team the active team (prevents stale active_team_id after re-seed)
+    await db.users.update_one({"id": user["id"]}, {"$set": {"active_team_id": team_id}})
 
     demo_athletes = [
         ("João Silva", "Guarda-Redes", 1),

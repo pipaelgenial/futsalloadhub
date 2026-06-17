@@ -83,7 +83,23 @@ e estilo dashboard.
   - Bem-Estar 1-10 com descritivo por valor (Esgotamento profundo → Energia radiante)
 - Todos os pickers atualizam o texto descritivo em tempo real
 
-## Phase 7 — Deferred
+## Phase 7 — Multi-Team + Calendar Redesign + Copy Last Session (17 Jun 2026)
+- **Multi-Equipa (até 5)**: backend (GET/POST/PUT/DELETE /api/teams, POST /api/teams/{id}/activate),
+  filtros por active_team_id em todas as queries, cascade delete, upload de logo
+- **TeamSwitcher**: dropdown no sidebar e mobile com logo + nome da equipa ativa,
+  troca via POST /api/teams/{id}/activate + window.location.reload, atalho 'Gerir equipas'
+- **TeamProfile reescrito**: gere até 5 equipas, criação/edição/eliminação inline + upload de logo
+- **Calendar redesenhado**:
+  - Fundo da célula colorido pelo tipo de sessão dominante (Treino/Jogo/Ginásio/Recuperação)
+  - Intensidade do fundo escalada pela carga (loadIntensity)
+  - Cor do número da carga por zona de volume (cinza<800, lime<2500, amarelo<4500, laranja<7000, vermelho)
+  - Modo "Mês" (default) e modo "Intervalo personalizado" com date pickers + presets 7D/30D/90D
+- **Copiar Último Treino**: botão em LogSession.jsx que faz GET /api/sessions?athlete_id=X
+  e preenche o formulário com a última sessão (session_type, rpe, duração, sono, bem-estar).
+  Toast informativo quando não há histórico.
+- **Seed idempotente**: POST /api/seed/demo agora repõe active_team_id para a equipa seed recriada
+
+## Phase 8 — Deferred
 ### P0
 - **Resumo Mensal Automático**: para cada atleta, média de carga e qualidade do sono
   por mês, com destaque de evolução (delta vs. mês anterior)
@@ -108,5 +124,6 @@ e estilo dashboard.
 
 ## Next Actions
 1. Implementar resumo mensal por atleta
-2. Implementar página de comparação de 2 atletas
+2. Implementar página de comparação de 2 atletas (parcialmente já existe via /comparar)
 3. Refatorar server.py em módulos (routers/services)
+4. Tornar todo o seed/demo idempotente (atualmente só o active_team_id é refeito; sessões/atletas/injuries são recriados sempre)
