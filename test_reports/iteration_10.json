@@ -1,0 +1,25 @@
+{
+  "summary": "Frontend-only refinements e2e tested. All 8 review requirements PASS: (1) Calendar removed mode/range/preset testids, only month+span(1/2/3) selectors remain; (2) span=2/3 renders 2/3 MonthGrids; (3) load text color computed per-athlete verified empirically (4320/7=617→amarelo; 2880/6=480→lime; 870/6=145→cinza; 1290/7=184→cinza); (4) TeamSwitcher refetches on open — new team created via POST /api/teams appears immediately without page reload; (5) refetch on route change works on /atletas, /calendario, /equipa; (6) TeamProfile has 0 activate-team-* buttons, EDITAR+delete present on all cards, 'Ativa' badge preserved; (7) Regression OK: login, NotificationsBell sino, calendar day-detail panel; (8) Cleanup completed — only original 2 teams remain.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TeamSwitcher.jsx: refetch logic correct — useEffect on [location.pathname] + load() inside toggleOpen. Tradeoff: cada navegação dispara GET /api/teams (vi 4-5 chamadas /api/teams na sessão de teste). Para optimizar, considerar SWR/react-query com staleTime curto OU window event 'team-list-changed' disparado por TeamProfile create/delete. Aceitável para MVP.",
+    "Calendar.jsx: thresholds per-athlete são razoáveis (300/600/900/1200 UA/atleta). Documentação na UI (Legend) está alinhada com o código. Sugestão: tornar limiares configuráveis por equipa (escalão sub-15 vs sénior tem cargas diferentes) — não bloqueador.",
+    "TeamProfile.jsx: remoção do botão ATIVAR e do import Check é limpa. Único caminho para activar equipa é via TeamSwitcher na sidebar — consistente. Considerar adicionar tooltip 'Para alterar equipa ativa use o switcher na barra lateral' no card inactivo para melhor UX descoberta.",
+    "TeamSwitcher.jsx: ao mudar de equipa faz window.location.reload() (linha 56). Isto é hard-reload — perde-se state, mas garante refetch de tudo. Trade-off conhecido e aceitável para evitar bugs subtis de cache entre equipas."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "n/a (frontend-only iteration)", "frontend": "100% (8/8 requisitos)" },
+  "test_credentials": "treinador@futsal.pt / treinador123 (validadas)",
+  "seed_data_creation": "Criada e ELIMINADA: equipa TEST_SwitcherTeam (id 3ba7a41c-9796-404d-9928-fd3268109b16) via POST /api/teams; eliminada via DELETE /api/teams/{id}. Estado final: apenas as 2 equipas originais ('Sporting Futsal Lisboa' ativa + 'Sporting Futsal Lisboa' inactiva) — sem poluição.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Calendar testids estáveis: cal-prev, month-selector, span-selector (values 1/2/3), cal-next, cal-today, cal-day-YYYY-MM-DD, month-grid-YYYY-M, day-detail. TeamSwitcher: team-switcher-btn, team-switcher-dropdown, team-switcher-item-{id}, team-switcher-manage, team-switcher-create, active-team-name. TeamProfile: team-card-{id}, edit-team-{id}, delete-team-{id}, team-active-{id} (badge), team-name/escalao/epoca/save/cancel, add-team-btn. Activate só via TeamSwitcher dropdown (switchTeam faz POST /teams/{id}/activate + window.location.reload). Demo team tem ~7-8 atletas com cargas diárias entre 800 e 4500 UA — útil para validar visualmente o color mapping per-athlete. NotificationsBell continua funcional. Para criar dados de teste use POST /api/teams (não /api/seed/demo).",
+  "rca of the issue": "Sem bugs encontrados — todos os refinamentos implementados conforme especificação."
+}

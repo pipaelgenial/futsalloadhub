@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
-import { Plus, Trash2, Check, Pencil } from "lucide-react";
+import { Plus, Trash2, Pencil } from "lucide-react";
 import TeamLogo from "@/components/TeamLogo";
 
 const MAX_TEAMS = 5;
@@ -57,16 +57,6 @@ export default function TeamProfile() {
       load();
     } catch (err) { toast.error(formatApiError(err)); }
     finally { setSaving(false); }
-  }
-
-  async function activate(id) {
-    try {
-      await http.post(`/teams/${id}/activate`);
-      toast.success("Equipa ativa alterada");
-      load();
-      // hard refresh other pages by triggering a custom event
-      window.dispatchEvent(new Event("active-team-changed"));
-    } catch (err) { toast.error(formatApiError(err)); }
   }
 
   async function remove(t) {
@@ -154,12 +144,7 @@ export default function TeamProfile() {
               )}
             </div>
             <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/5">
-              {!t.active && (
-                <button onClick={() => activate(t.id)} className="fld-btn-ghost text-xs flex items-center gap-1 flex-1" data-testid={`activate-team-${t.id}`}>
-                  <Check className="w-3.5 h-3.5" /> ATIVAR
-                </button>
-              )}
-              <button onClick={() => startEdit(t)} className="fld-btn-ghost text-xs flex items-center gap-1" data-testid={`edit-team-${t.id}`}>
+              <button onClick={() => startEdit(t)} className="fld-btn-ghost text-xs flex items-center gap-1 flex-1" data-testid={`edit-team-${t.id}`}>
                 <Pencil className="w-3.5 h-3.5" /> EDITAR
               </button>
               <button onClick={() => remove(t)} className="fld-btn-ghost text-xs flex items-center gap-1 text-[#FF3B30] border-[#FF3B30]/30 hover:bg-[#FF3B30]/10" data-testid={`delete-team-${t.id}`}>

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 import { ChevronDown, Check, Plus } from "lucide-react";
@@ -15,17 +15,26 @@ export default function TeamSwitcher() {
   const [switching, setSwitching] = useState(false);
   const ref = useRef(null);
   const navigate = useNavigate();
+  const location = useLocation();
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const { data } = await http.get("/teams");
       setTeams(data || []);
     } catch (err) {
-      // Silent: app may still be onboarding
       console.error(err);
     }
+  }, []);
+
+  // Refetch on route change (covers create/delete from /equipa)
+  useEffect(() => { load(); }, [load, location.pathname]);
+
+  // Also refetch when opening the dropdown so the list is always fresh
+  function toggleOpen() {
+    const next = !open;
+    setOpen(next);
+    if (next) load();
   }
-  useEffect(() => { load(); }, []);
 
   useEffect(() => {
     function onClick(e) {
@@ -67,7 +76,7 @@ export default function TeamSwitcher() {
     <div className="relative" ref={ref}>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleOpen}
         disabled={switching}
         data-testid="team-switcher-btn"
         className="flex items-center gap-2.5 px-2 py-1.5 border border-white/10 hover:border-white/30 bg-[#0F0F0F] transition-all w-full text-left"

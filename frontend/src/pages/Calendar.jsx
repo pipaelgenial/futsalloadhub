@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, X, CalendarRange, CalendarDays } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { SESSION_TYPES, SessionTypeBadge } from "@/components/Bits";
 
 const WEEKDAY_NAMES = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
 const MONTHS_PT = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 
 const isoDate = (d) => d.toISOString().slice(0, 10);
-const fromISO = (s) => new Date(s + "T00:00:00");
 const today = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
 
 function daysInMonth(year, monthIdx) { return new Date(year, monthIdx + 1, 0).getDate(); }
@@ -21,24 +20,30 @@ function startOfWeekMonday(d) {
   return x;
 }
 
-// Carga (volume) -> cor do texto numérico
-function loadTextColor(load) {
+// Carga MÉDIA POR ATLETA (UA) -> cor do texto numérico
+// Os limiares são per-athlete para não dar "cores falsas" quando o nº
+// de atletas no plantel varia (3 vs 8 atletas mudaria escala absoluta).
+function loadTextColor(load, athletesCount) {
   if (!load) return "#fff";
-  if (load < 800) return "#9CA3AF";       // muito baixa - cinza
-  if (load < 2500) return "#CCFF00";      // ideal - lime
-  if (load < 4500) return "#FFEA00";      // moderada-alta - amarelo
-  if (load < 7000) return "#FF9500";      // alta - laranja
-  return "#FF3B30";                       // muito alta - vermelho
+  const n = Math.max(1, athletesCount || 1);
+  const perAth = load / n;
+  if (perAth < 300) return "#9CA3AF";       // baixíssima - cinza
+  if (perAth < 600) return "#CCFF00";       // ideal - lime
+  if (perAth < 900) return "#FFEA00";       // moderada-alta - amarelo
+  if (perAth < 1200) return "#FF9500";      // alta - laranja
+  return "#FF3B30";                          // muito alta - vermelho
 }
 
-// Carga (volume) -> intensidade de fundo (0..1)
-function loadIntensity(load) {
+// Carga MÉDIA POR ATLETA -> intensidade de fundo (0..1)
+function loadIntensity(load, athletesCount) {
   if (!load) return 0;
-  if (load < 800) return 0.10;
-  if (load < 2500) return 0.20;
-  if (load < 4500) return 0.30;
-  if (load < 7000) return 0.42;
-  return 0.55;
+  const n = Math.max(1, athletesCount || 1);
+  const perAth = load / n;
+  if (perAth < 300) return 0.10;
+  if (perAth < 600) return 0.20;
+  if (perAth < 900) return 0.32;
+  if (perAth < 1200) return 0.45;
+  return 0.58;
 }
 
 // Tipo dominante das sessões do dia
@@ -65,14 +70,14 @@ function cellStyle(d) {
   const meta = type ? SESSION_TYPES[type] : null;
   const baseColor = meta?.color || "#CCFF00";
   const { r, g, b } = hexToRgb(baseColor);
-  const alpha = loadIntensity(d.total_load);
+  const alpha = loadIntensity(d.total_load, d.athletes_count);
   return {
     bg: `rgba(${r},${g},${b},${alpha})`,
     border: `rgba(${r},${g},${b},${Math.min(0.9, alpha + 0.35)})`,
   };
 }
 
-function MonthGrid({ year, monthIdx, daysData, selectedDate, onSelect, rangeStartISO, rangeEndISO }) {
+function MonthGrid({ year, monthIdx, daysData, selectedDate, onSelect }) {
   const first = firstDayOfMonth(year, monthIdx);
   const gridStart = startOfWeekMonday(first);
   const totalDays = daysInMonth(year, monthIdx);
@@ -85,9 +90,8 @@ function MonthGrid({ year, monthIdx, daysData, selectedDate, onSelect, rangeStar
   while (cur <= gridEnd) {
     const iso = isoDate(cur);
     const inMonth = cur.getMonth() === monthIdx;
-    const inRange = (!rangeStartISO || iso >= rangeStartISO) && (!rangeEndISO || iso <= rangeEndISO);
     const dayData = daysData[iso];
-    cells.push({ date: new Date(cur), iso, inMonth, inRange, data: dayData });
+    cells.push({ date: new Date(cur), iso, inMonth, data: dayData });
     cur.setDate(cur.getDate() + 1);
   }
   const rows = [];
@@ -110,8 +114,8 @@ function MonthGrid({ year, monthIdx, daysData, selectedDate, onSelect, rangeStar
               const d = c.data;
               const cs = cellStyle(d);
               const isToday = c.iso === isoDate(today());
-              const dimmed = !c.inMonth || !c.inRange;
-              const txtColor = loadTextColor(d?.total_load);
+              const dimmed = !c.inMonth;
+              const txtColor = loadTextColor(d?.total_load, d?.athletes_count);
               return (
                 <button
                   key={c.iso}
@@ -159,37 +163,16 @@ function MonthGrid({ year, monthIdx, daysData, selectedDate, onSelect, rangeStar
 }
 
 export default function CalendarPage() {
-  const [mode, setMode] = useState("month"); // "month" | "range"
   const [year, setYear] = useState(today().getFullYear());
   const [monthIdx, setMonthIdx] = useState(today().getMonth());
   const [spanMonths, setSpanMonths] = useState(1);
-
-  // Range mode: default last 30 days
-  const defaultRangeStart = useMemo(() => { const d = today(); d.setDate(d.getDate() - 29); return isoDate(d); }, []);
-  const defaultRangeEnd = useMemo(() => isoDate(today()), []);
-  const [rangeStart, setRangeStart] = useState(defaultRangeStart);
-  const [rangeEnd, setRangeEnd] = useState(defaultRangeEnd);
 
   const [daysData, setDaysData] = useState({});
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(null);
 
-  // Active query range (start ISO, days, list of months to render)
+  // Active query (start, days, list of months to render)
   const query = useMemo(() => {
-    if (mode === "range") {
-      const s = fromISO(rangeStart);
-      const e = fromISO(rangeEnd);
-      if (e < s) return { start: s, end: s, days: 1, months: [{ y: s.getFullYear(), m: s.getMonth() }] };
-      const days = Math.floor((e - s) / 86400000) + 1;
-      const months = [];
-      let cur = new Date(s.getFullYear(), s.getMonth(), 1);
-      const endMonthDate = new Date(e.getFullYear(), e.getMonth(), 1);
-      while (cur <= endMonthDate) {
-        months.push({ y: cur.getFullYear(), m: cur.getMonth() });
-        cur.setMonth(cur.getMonth() + 1);
-      }
-      return { start: s, end: e, days, months };
-    }
     const start = new Date(year, monthIdx, 1);
     const endMonth = monthIdx + spanMonths - 1;
     const endY = year + Math.floor(endMonth / 12);
@@ -205,7 +188,7 @@ export default function CalendarPage() {
       months.push({ y, m });
     }
     return { start, end, days, months };
-  }, [mode, rangeStart, rangeEnd, year, monthIdx, spanMonths]);
+  }, [year, monthIdx, spanMonths]);
 
   async function load() {
     setLoading(true);
@@ -244,11 +227,7 @@ export default function CalendarPage() {
     return out;
   }, []);
 
-  // Filtra daysData ao range ativo para os totais
-  const filteredDays = useMemo(() => {
-    if (mode !== "range") return Object.values(daysData);
-    return Object.values(daysData).filter((d) => d.date >= rangeStart && d.date <= rangeEnd);
-  }, [daysData, mode, rangeStart, rangeEnd]);
+  const filteredDays = useMemo(() => Object.values(daysData), [daysData]);
 
   const totalLoad = useMemo(() => filteredDays.reduce((s, d) => s + (d.total_load || 0), 0), [filteredDays]);
   const trainingDays = useMemo(() => filteredDays.filter((d) => d.athletes_count > 0).length, [filteredDays]);
@@ -261,15 +240,6 @@ export default function CalendarPage() {
     return out;
   }, [filteredDays]);
 
-  // Range picker quick presets
-  function applyPreset(days) {
-    const end = today();
-    const start = new Date(end);
-    start.setDate(start.getDate() - (days - 1));
-    setRangeStart(isoDate(start));
-    setRangeEnd(isoDate(end));
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between flex-wrap gap-4">
@@ -279,80 +249,32 @@ export default function CalendarPage() {
           <p className="text-[#A3A3A3] text-xs sm:text-sm mt-2">Cor da célula pelo tipo de sessão · Cor do número pela carga</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Mode toggle */}
-          <div className="flex border border-white/10 overflow-hidden" data-testid="cal-mode-toggle">
-            <button
-              onClick={() => setMode("month")}
-              data-testid="cal-mode-month"
-              className={`px-3 py-2 text-xs font-head uppercase tracking-widest flex items-center gap-1.5 transition-all ${mode === "month" ? "bg-[#CCFF00] text-black" : "text-[#A3A3A3] hover:text-white"}`}
-            >
-              <CalendarDays className="w-3.5 h-3.5" /> Mês
-            </button>
-            <button
-              onClick={() => setMode("range")}
-              data-testid="cal-mode-range"
-              className={`px-3 py-2 text-xs font-head uppercase tracking-widest flex items-center gap-1.5 transition-all ${mode === "range" ? "bg-[#CCFF00] text-black" : "text-[#A3A3A3] hover:text-white"}`}
-            >
-              <CalendarRange className="w-3.5 h-3.5" /> Intervalo
-            </button>
-          </div>
-
-          {mode === "month" ? (
-            <>
-              <button onClick={() => shiftMonth(-1)} className="fld-btn-ghost px-3 py-2" data-testid="cal-prev"><ChevronLeft className="w-4 h-4" /></button>
-              <select
-                value={`${year}-${monthIdx}`}
-                onChange={(e) => {
-                  const [y, m] = e.target.value.split("-").map(Number);
-                  setYear(y); setMonthIdx(m);
-                }}
-                className="fld-input py-2 text-sm min-w-[150px]"
-                data-testid="month-selector"
-              >
-                {monthOptions.map((o) => (
-                  <option key={`${o.y}-${o.m}`} value={`${o.y}-${o.m}`}>{o.label}</option>
-                ))}
-              </select>
-              <select
-                value={spanMonths}
-                onChange={(e) => setSpanMonths(Number(e.target.value))}
-                className="fld-input py-2 text-sm"
-                data-testid="span-selector"
-              >
-                <option value={1}>1 mês</option>
-                <option value={2}>2 meses</option>
-                <option value={3}>3 meses</option>
-                <option value={6}>6 meses</option>
-              </select>
-              <button onClick={() => shiftMonth(1)} className="fld-btn-ghost px-3 py-2" data-testid="cal-next"><ChevronRight className="w-4 h-4" /></button>
-              <button onClick={goToday} className="fld-btn-ghost text-xs" data-testid="cal-today">HOJE</button>
-            </>
-          ) : (
-            <div className="flex items-center gap-2 flex-wrap" data-testid="cal-range-picker">
-              <input
-                type="date"
-                value={rangeStart}
-                max={rangeEnd}
-                onChange={(e) => setRangeStart(e.target.value)}
-                className="fld-input py-2 text-sm"
-                data-testid="cal-range-start"
-              />
-              <span className="text-[#525252] text-xs">→</span>
-              <input
-                type="date"
-                value={rangeEnd}
-                min={rangeStart}
-                onChange={(e) => setRangeEnd(e.target.value)}
-                className="fld-input py-2 text-sm"
-                data-testid="cal-range-end"
-              />
-              <div className="flex gap-1">
-                <button onClick={() => applyPreset(7)} className="fld-btn-ghost text-[10px] px-2 py-1.5" data-testid="preset-7d">7D</button>
-                <button onClick={() => applyPreset(30)} className="fld-btn-ghost text-[10px] px-2 py-1.5" data-testid="preset-30d">30D</button>
-                <button onClick={() => applyPreset(90)} className="fld-btn-ghost text-[10px] px-2 py-1.5" data-testid="preset-90d">90D</button>
-              </div>
-            </div>
-          )}
+          <button onClick={() => shiftMonth(-1)} className="fld-btn-ghost px-3 py-2" data-testid="cal-prev"><ChevronLeft className="w-4 h-4" /></button>
+          <select
+            value={`${year}-${monthIdx}`}
+            onChange={(e) => {
+              const [y, m] = e.target.value.split("-").map(Number);
+              setYear(y); setMonthIdx(m);
+            }}
+            className="fld-input py-2 text-sm min-w-[150px]"
+            data-testid="month-selector"
+          >
+            {monthOptions.map((o) => (
+              <option key={`${o.y}-${o.m}`} value={`${o.y}-${o.m}`}>{o.label}</option>
+            ))}
+          </select>
+          <select
+            value={spanMonths}
+            onChange={(e) => setSpanMonths(Number(e.target.value))}
+            className="fld-input py-2 text-sm"
+            data-testid="span-selector"
+          >
+            <option value={1}>1 mês</option>
+            <option value={2}>2 meses</option>
+            <option value={3}>3 meses</option>
+          </select>
+          <button onClick={() => shiftMonth(1)} className="fld-btn-ghost px-3 py-2" data-testid="cal-next"><ChevronRight className="w-4 h-4" /></button>
+          <button onClick={goToday} className="fld-btn-ghost text-xs" data-testid="cal-today">HOJE</button>
         </div>
       </div>
 
@@ -395,8 +317,6 @@ export default function CalendarPage() {
               daysData={daysData}
               selectedDate={selectedDate}
               onSelect={setSelectedDate}
-              rangeStartISO={mode === "range" ? rangeStart : null}
-              rangeEndISO={mode === "range" ? rangeEnd : null}
             />
           ))}
         </div>
@@ -414,12 +334,12 @@ export default function CalendarPage() {
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-white font-bold">Cor do nº carga:</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#9CA3AF]" /> &lt;800 baixíssima</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#CCFF00]" /> 800-2500 ideal</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#FFEA00]" /> 2500-4500 mod-alta</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#FF9500]" /> 4500-7000 alta</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#FF3B30]" /> &gt;7000 muito alta</span>
+          <span className="text-white font-bold">Cor do nº carga (média/atleta):</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#9CA3AF]" /> &lt;300 baixíssima</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#CCFF00]" /> 300-600 ideal</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#FFEA00]" /> 600-900 mod-alta</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#FF9500]" /> 900-1200 alta</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#FF3B30]" /> &gt;1200 muito alta</span>
         </div>
       </div>
 
