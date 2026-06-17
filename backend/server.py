@@ -110,6 +110,24 @@ class TeamIn(BaseModel):
     name: str
     escalao: str
     epoca: str
+    load_thresholds: Optional[dict] = None  # {ideal, moderate, high, very_high} per-athlete UA
+
+
+DEFAULT_LOAD_THRESHOLDS = {"ideal": 300, "moderate": 600, "high": 900, "very_high": 1200}
+
+
+def _sanitize_thresholds(raw):
+    """Validate and normalise load_thresholds dict. Returns dict or None if invalid."""
+    if not isinstance(raw, dict):
+        return None
+    try:
+        t = {k: int(raw.get(k)) for k in ("ideal", "moderate", "high", "very_high")}
+    except (TypeError, ValueError):
+        return None
+    # require strictly increasing positive values
+    if not (0 < t["ideal"] < t["moderate"] < t["high"] < t["very_high"]):
+        return None
+    return t
 
 
 class AthleteIn(BaseModel):
@@ -238,6 +256,8 @@ async def get_team(user=Depends(get_current_user)):
     team = await _get_active_team(user, required=False)
     if team:
         team.pop("_id", None)
+        if not team.get("load_thresholds"):
+            team["load_thresholds"] = DEFAULT_LOAD_THRESHOLDS
     return team
 
 
@@ -277,6 +297,8 @@ async def list_teams(user=Depends(get_current_user)):
     teams = await db.teams.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", 1).to_list(20)
     for t in teams:
         t["active"] = (t["id"] == active_id)
+        if not t.get("load_thresholds"):
+            t["load_thresholds"] = DEFAULT_LOAD_THRESHOLDS
     return teams
 
 
@@ -287,12 +309,14 @@ async def create_team(data: TeamIn, user=Depends(get_current_user)):
     if count >= MAX_TEAMS_PER_USER:
         raise HTTPException(400, f"Limite de {MAX_TEAMS_PER_USER} equipas atingido")
     team_id = str(uuid.uuid4())
+    thresholds = _sanitize_thresholds(data.load_thresholds) or DEFAULT_LOAD_THRESHOLDS
     doc = {
         "id": team_id,
         "user_id": user["id"],
         "name": data.name,
         "escalao": data.escalao,
         "epoca": data.epoca,
+        "load_thresholds": thresholds,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.teams.insert_one(doc)
@@ -307,11 +331,16 @@ async def update_team_by_id(team_id: str, data: TeamIn, user=Depends(get_current
     existing = await db.teams.find_one({"id": team_id, "user_id": user["id"]})
     if not existing:
         raise HTTPException(404, "Equipa não encontrada")
-    await db.teams.update_one(
-        {"id": team_id},
-        {"$set": {"name": data.name, "escalao": data.escalao, "epoca": data.epoca}},
-    )
+    update_fields = {"name": data.name, "escalao": data.escalao, "epoca": data.epoca}
+    if data.load_thresholds is not None:
+        thresholds = _sanitize_thresholds(data.load_thresholds)
+        if not thresholds:
+            raise HTTPException(400, "Limiares inválidos — devem ser inteiros positivos crescentes")
+        update_fields["load_thresholds"] = thresholds
+    await db.teams.update_one({"id": team_id}, {"$set": update_fields})
     refreshed = await db.teams.find_one({"id": team_id}, {"_id": 0})
+    if refreshed and not refreshed.get("load_thresholds"):
+        refreshed["load_thresholds"] = DEFAULT_LOAD_THRESHOLDS
     return refreshed
 
 

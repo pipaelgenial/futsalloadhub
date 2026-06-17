@@ -20,29 +20,31 @@ function startOfWeekMonday(d) {
   return x;
 }
 
+const DEFAULT_THRESHOLDS = { ideal: 300, moderate: 600, high: 900, very_high: 1200 };
+
 // Carga MÉDIA POR ATLETA (UA) -> cor do texto numérico
-// Os limiares são per-athlete para não dar "cores falsas" quando o nº
-// de atletas no plantel varia (3 vs 8 atletas mudaria escala absoluta).
-function loadTextColor(load, athletesCount) {
+// Os limiares são per-athlete e configuráveis por equipa (TeamProfile) para
+// não dar "cores falsas" quando o nº de atletas no plantel ou o escalão varia.
+function loadTextColor(load, athletesCount, th = DEFAULT_THRESHOLDS) {
   if (!load) return "#fff";
   const n = Math.max(1, athletesCount || 1);
   const perAth = load / n;
-  if (perAth < 300) return "#9CA3AF";       // baixíssima - cinza
-  if (perAth < 600) return "#CCFF00";       // ideal - lime
-  if (perAth < 900) return "#FFEA00";       // moderada-alta - amarelo
-  if (perAth < 1200) return "#FF9500";      // alta - laranja
-  return "#FF3B30";                          // muito alta - vermelho
+  if (perAth < th.ideal) return "#9CA3AF";       // baixíssima - cinza
+  if (perAth < th.moderate) return "#CCFF00";    // ideal - lime
+  if (perAth < th.high) return "#FFEA00";        // moderada-alta - amarelo
+  if (perAth < th.very_high) return "#FF9500";   // alta - laranja
+  return "#FF3B30";                              // muito alta - vermelho
 }
 
 // Carga MÉDIA POR ATLETA -> intensidade de fundo (0..1)
-function loadIntensity(load, athletesCount) {
+function loadIntensity(load, athletesCount, th = DEFAULT_THRESHOLDS) {
   if (!load) return 0;
   const n = Math.max(1, athletesCount || 1);
   const perAth = load / n;
-  if (perAth < 300) return 0.10;
-  if (perAth < 600) return 0.20;
-  if (perAth < 900) return 0.32;
-  if (perAth < 1200) return 0.45;
+  if (perAth < th.ideal) return 0.10;
+  if (perAth < th.moderate) return 0.20;
+  if (perAth < th.high) return 0.32;
+  if (perAth < th.very_high) return 0.45;
   return 0.58;
 }
 
@@ -64,20 +66,20 @@ function hexToRgb(hex) {
   return { r, g, b };
 }
 
-function cellStyle(d) {
+function cellStyle(d, th) {
   if (!d || !d.total_load) return { bg: "transparent", border: "rgba(255,255,255,0.05)" };
   const type = dominantType(d);
   const meta = type ? SESSION_TYPES[type] : null;
   const baseColor = meta?.color || "#CCFF00";
   const { r, g, b } = hexToRgb(baseColor);
-  const alpha = loadIntensity(d.total_load, d.athletes_count);
+  const alpha = loadIntensity(d.total_load, d.athletes_count, th);
   return {
     bg: `rgba(${r},${g},${b},${alpha})`,
     border: `rgba(${r},${g},${b},${Math.min(0.9, alpha + 0.35)})`,
   };
 }
 
-function MonthGrid({ year, monthIdx, daysData, selectedDate, onSelect }) {
+function MonthGrid({ year, monthIdx, daysData, selectedDate, onSelect, thresholds }) {
   const first = firstDayOfMonth(year, monthIdx);
   const gridStart = startOfWeekMonday(first);
   const totalDays = daysInMonth(year, monthIdx);
@@ -112,10 +114,10 @@ function MonthGrid({ year, monthIdx, daysData, selectedDate, onSelect }) {
           <div key={ri} className="grid grid-cols-7 gap-1.5">
             {row.map((c) => {
               const d = c.data;
-              const cs = cellStyle(d);
+              const cs = cellStyle(d, thresholds);
               const isToday = c.iso === isoDate(today());
               const dimmed = !c.inMonth;
-              const txtColor = loadTextColor(d?.total_load, d?.athletes_count);
+              const txtColor = loadTextColor(d?.total_load, d?.athletes_count, thresholds);
               return (
                 <button
                   key={c.iso}
@@ -170,6 +172,14 @@ export default function CalendarPage() {
   const [daysData, setDaysData] = useState({});
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(null);
+  const [thresholds, setThresholds] = useState(DEFAULT_THRESHOLDS);
+
+  // Fetch active team thresholds
+  useEffect(() => {
+    http.get("/team").then(({ data }) => {
+      if (data?.load_thresholds) setThresholds(data.load_thresholds);
+    }).catch(() => { /* keep defaults */ });
+  }, []);
 
   // Active query (start, days, list of months to render)
   const query = useMemo(() => {
@@ -317,6 +327,7 @@ export default function CalendarPage() {
               daysData={daysData}
               selectedDate={selectedDate}
               onSelect={setSelectedDate}
+              thresholds={thresholds}
             />
           ))}
         </div>
@@ -335,11 +346,11 @@ export default function CalendarPage() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-white font-bold">Cor do nº carga (média/atleta):</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#9CA3AF]" /> &lt;300 baixíssima</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#CCFF00]" /> 300-600 ideal</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#FFEA00]" /> 600-900 mod-alta</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#FF9500]" /> 900-1200 alta</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#FF3B30]" /> &gt;1200 muito alta</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#9CA3AF]" /> &lt;{thresholds.ideal} baixíssima</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#CCFF00]" /> {thresholds.ideal}-{thresholds.moderate} ideal</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#FFEA00]" /> {thresholds.moderate}-{thresholds.high} mod-alta</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#FF9500]" /> {thresholds.high}-{thresholds.very_high} alta</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#FF3B30]" /> ≥{thresholds.very_high} muito alta</span>
         </div>
       </div>
 

@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 11 — Configurable per-athlete load_thresholds (defaults 300/600/900/1200) on teams. Backend (6 pytest) + Frontend (Playwright) tests all PASS. Backend correctly persists, validates and returns thresholds with defaults when absent. Frontend TeamProfile shows the 4 inputs pre-filled, all 5 escalão presets work, reset works, non-increasing validation blocks PUT with the exact required toast, valid save shows 'Equipa atualizada' and closes the form. Calendar /calendario shows the active team's thresholds in the legend (200/400/600/800 after Sub-13 preset applied). Demo team thresholds restored to defaults at the end.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_load_thresholds.py",
+    "/app/test_reports/pytest/load_thresholds_results.xml"
+  ],
+  "action_items": [
+    "Optional cleanup: a duplicate 'Sporting Futsal Lisboa' team (id e516a890-...) lingers in the demo account from a previous iteration. Not created by this iteration but you may want a manual cleanup. Both teams already have default thresholds 300/600/900/1200.",
+    "Minor cosmetic: Calendar legend works but is rendered on a single line — consider wrapping the breakpoints (<200 baixíssima · 200-400 ideal · ...) into a more readable badge layout on mobile."
+  ],
+  "critical_code_review_comments": [
+    "_sanitize_thresholds correctly enforces 0 < ideal < moderate < high < very_high and returns None on invalid input; PUT raises 400 with 'Limiares inválidos — devem ser inteiros positivos crescentes' — message matches spec close enough ('Limiares inválidos').",
+    "GET /api/team and GET /api/teams patch defaults on the fly when the persisted doc has no load_thresholds — good back-compat.",
+    "POST /api/teams falls back to DEFAULT_LOAD_THRESHOLDS when data.load_thresholds is invalid OR missing (not just missing). This is a slight deviation from strict-rejection: an invalid POST payload silently becomes the default instead of returning 400. Decide if this is intentional vs PUT (which 400s on invalid).",
+    "TeamProfile.jsx applyPreset uses toast.success — matches requirement 'Predefinição Sub-15 aplicada'.",
+    "Calendar.jsx correctly fetches /api/team thresholds and passes them to MonthGrid + legend (verified visually — legend updates with custom thresholds)."
+  ],
+  "updated_files": ["/app/backend/tests/test_load_thresholds.py"],
+  "success_rate": { "backend": "100% (6/6)", "frontend": "100% (all checks)" },
+  "test_credentials": "treinador@futsal.pt / treinador123",
+  "seed_data_creation": "Tests created TEST_Sub13, TEST_Defaults, TEST_ForInvalid teams and deleted them in fixture teardown. Demo team threshold was reset to 300/600/900/1200 via UI at end of frontend test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "load_thresholds feature is fully working end-to-end. Test file at /app/backend/tests/test_load_thresholds.py is reusable. Note: POST /api/teams silently falls back to defaults if invalid thresholds are passed (no 400); PUT correctly returns 400. There is one orphan duplicate demo team (id e516a890-...) in the demo account from prior iteration — harmless.",
+  "rca of the issue": "N/A — no bugs found."
+}

@@ -1,16 +1,27 @@
 import { useEffect, useState } from "react";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
-import { Plus, Trash2, Pencil } from "lucide-react";
+import { Plus, Trash2, Pencil, Sliders } from "lucide-react";
 import TeamLogo from "@/components/TeamLogo";
 
 const MAX_TEAMS = 5;
+
+const DEFAULT_THRESHOLDS = { ideal: 300, moderate: 600, high: 900, very_high: 1200 };
+
+// Sugestões por escalão (UA por atleta por dia)
+const ESCALAO_PRESETS = {
+  "Sub-13": { ideal: 200, moderate: 400, high: 600, very_high: 800 },
+  "Sub-15": { ideal: 250, moderate: 500, high: 750, very_high: 1000 },
+  "Sub-17": { ideal: 300, moderate: 600, high: 900, very_high: 1200 },
+  "Sub-19": { ideal: 350, moderate: 700, high: 1050, very_high: 1400 },
+  "Sénior": { ideal: 400, moderate: 800, high: 1200, very_high: 1600 },
+};
 
 export default function TeamProfile() {
   const [teams, setTeams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null); // id or "new"
-  const [form, setForm] = useState({ name: "", escalao: "", epoca: "" });
+  const [form, setForm] = useState({ name: "", escalao: "", epoca: "", load_thresholds: { ...DEFAULT_THRESHOLDS } });
   const [saving, setSaving] = useState(false);
 
   async function load() {
@@ -29,28 +40,69 @@ export default function TeamProfile() {
       return;
     }
     setEditing("new");
-    setForm({ name: "", escalao: "", epoca: "" });
+    setForm({ name: "", escalao: "", epoca: "", load_thresholds: { ...DEFAULT_THRESHOLDS } });
   }
 
   function startEdit(t) {
     setEditing(t.id);
-    setForm({ name: t.name, escalao: t.escalao, epoca: t.epoca });
+    setForm({
+      name: t.name,
+      escalao: t.escalao,
+      epoca: t.epoca,
+      load_thresholds: t.load_thresholds || { ...DEFAULT_THRESHOLDS },
+    });
   }
 
   function cancel() {
     setEditing(null);
-    setForm({ name: "", escalao: "", epoca: "" });
+    setForm({ name: "", escalao: "", epoca: "", load_thresholds: { ...DEFAULT_THRESHOLDS } });
+  }
+
+  function setThreshold(key, value) {
+    setForm((f) => ({ ...f, load_thresholds: { ...f.load_thresholds, [key]: value } }));
+  }
+
+  function applyPreset(presetName) {
+    const p = ESCALAO_PRESETS[presetName];
+    if (!p) return;
+    setForm((f) => ({ ...f, load_thresholds: { ...p } }));
+    toast.success(`Predefinição ${presetName} aplicada`);
+  }
+
+  function resetThresholdsDefault() {
+    setForm((f) => ({ ...f, load_thresholds: { ...DEFAULT_THRESHOLDS } }));
+    toast.info("Limiares repostos para os predefinidos");
+  }
+
+  function validateThresholds(t) {
+    const v = [t.ideal, t.moderate, t.high, t.very_high].map(Number);
+    if (v.some((x) => !Number.isFinite(x) || x <= 0)) return "Todos os limiares devem ser positivos.";
+    if (!(v[0] < v[1] && v[1] < v[2] && v[2] < v[3])) return "Os limiares devem ser crescentes (ideal < moderada < alta < muito alta).";
+    return null;
   }
 
   async function save(e) {
     e.preventDefault();
+    const validationErr = validateThresholds(form.load_thresholds);
+    if (validationErr) { toast.error(validationErr); return; }
     setSaving(true);
     try {
+      const payload = {
+        name: form.name,
+        escalao: form.escalao,
+        epoca: form.epoca,
+        load_thresholds: {
+          ideal: Number(form.load_thresholds.ideal),
+          moderate: Number(form.load_thresholds.moderate),
+          high: Number(form.load_thresholds.high),
+          very_high: Number(form.load_thresholds.very_high),
+        },
+      };
       if (editing === "new") {
-        await http.post("/teams", form);
+        await http.post("/teams", payload);
         toast.success("Equipa criada");
       } else {
-        await http.put(`/teams/${editing}`, form);
+        await http.put(`/teams/${editing}`, payload);
         toast.success("Equipa atualizada");
       }
       cancel();
@@ -113,6 +165,97 @@ export default function TeamProfile() {
               <label className="fld-label">Época</label>
               <input className="fld-input" value={form.epoca} onChange={(e) => setForm({ ...form, epoca: e.target.value })} required data-testid="team-epoca" placeholder="Ex: 2025/2026" />
             </div>
+          </div>
+
+          {/* Limiares de carga por atleta */}
+          <div className="border-t border-white/5 pt-5">
+            <div className="flex items-start gap-2 mb-3">
+              <Sliders className="w-4 h-4 text-[#CCFF00] mt-0.5" />
+              <div className="flex-1">
+                <div className="font-head text-sm uppercase tracking-widest">Limiares de Carga por Atleta (UA/dia)</div>
+                <p className="text-[10px] text-[#525252] mt-1">
+                  Controlam as cores no calendário. Ajuste conforme o escalão — um Sub-15 não tem a mesma capacidade que um Sénior.
+                </p>
+              </div>
+            </div>
+
+            {/* Presets per escalão */}
+            <div className="flex flex-wrap gap-1.5 mb-3" data-testid="threshold-presets">
+              <span className="text-[10px] uppercase tracking-widest text-[#525252] self-center mr-1">Predefinições:</span>
+              {Object.keys(ESCALAO_PRESETS).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => applyPreset(p)}
+                  data-testid={`threshold-preset-${p}`}
+                  className="text-[10px] uppercase tracking-widest px-2 py-1 border border-white/10 hover:border-[#CCFF00]/60 hover:text-[#CCFF00] transition-all"
+                >
+                  {p}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={resetThresholdsDefault}
+                data-testid="threshold-reset"
+                className="text-[10px] uppercase tracking-widest px-2 py-1 border border-white/10 text-[#A3A3A3] hover:text-white transition-all ml-auto"
+              >
+                Repor 300/600/900/1200
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <label className="fld-label flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#CCFF00]" /> Ideal &lt;</label>
+                <input
+                  className="fld-input"
+                  type="number"
+                  min="1"
+                  value={form.load_thresholds.ideal}
+                  onChange={(e) => setThreshold("ideal", e.target.value)}
+                  data-testid="threshold-ideal"
+                  required
+                />
+              </div>
+              <div>
+                <label className="fld-label flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#FFEA00]" /> Moderada &lt;</label>
+                <input
+                  className="fld-input"
+                  type="number"
+                  min="1"
+                  value={form.load_thresholds.moderate}
+                  onChange={(e) => setThreshold("moderate", e.target.value)}
+                  data-testid="threshold-moderate"
+                  required
+                />
+              </div>
+              <div>
+                <label className="fld-label flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#FF9500]" /> Alta &lt;</label>
+                <input
+                  className="fld-input"
+                  type="number"
+                  min="1"
+                  value={form.load_thresholds.high}
+                  onChange={(e) => setThreshold("high", e.target.value)}
+                  data-testid="threshold-high"
+                  required
+                />
+              </div>
+              <div>
+                <label className="fld-label flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#FF3B30]" /> Muito alta &lt;</label>
+                <input
+                  className="fld-input"
+                  type="number"
+                  min="1"
+                  value={form.load_thresholds.very_high}
+                  onChange={(e) => setThreshold("very_high", e.target.value)}
+                  data-testid="threshold-very-high"
+                  required
+                />
+              </div>
+            </div>
+            <p className="text-[10px] text-[#525252] mt-2">
+              Cinza &lt; {form.load_thresholds.ideal || "—"} · Lime &lt; {form.load_thresholds.moderate || "—"} · Amarelo &lt; {form.load_thresholds.high || "—"} · Laranja &lt; {form.load_thresholds.very_high || "—"} · Vermelho ≥ {form.load_thresholds.very_high || "—"}
+            </p>
           </div>
           <div className="flex gap-3">
             <button type="submit" className="fld-btn-primary" disabled={saving} data-testid="team-save">
