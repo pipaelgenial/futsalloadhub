@@ -73,13 +73,44 @@ async def get_current_user(request: Request) -> dict:
         user = await db.users.find_one({"id": payload["sub"]})
         if not user:
             raise HTTPException(401, "Utilizador não encontrado")
+        if user.get("status") not in (None, "active"):
+            raise HTTPException(403, "Conta não ativa")
         user.pop("_id", None)
         user.pop("password_hash", None)
+        # Path-based role enforcement
+        path = request.url.path
+        role = user.get("role", "coach")
+        # Player can only access /api/auth/*, /api/player/*, /api/invite/* (and frontend assets)
+        if role == "player" and not (
+            path.startswith("/api/auth/")
+            or path.startswith("/api/player/")
+            or path.startswith("/api/invite/")
+        ):
+            raise HTTPException(403, "Acesso restrito à vista de atleta")
+        # Admin can only access /api/auth/* and /api/admin/*
+        if role == "admin" and not (
+            path.startswith("/api/auth/")
+            or path.startswith("/api/admin/")
+        ):
+            raise HTTPException(403, "Acesso restrito à vista de administrador")
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Sessão expirada")
     except jwt.InvalidTokenError:
         raise HTTPException(401, "Token inválido")
+
+
+def require_role(*roles: str):
+    """Dependency factory: raises 403 if current user is not in `roles`."""
+    async def _dep(user=Depends(get_current_user)) -> dict:
+        if user.get("role") not in roles:
+            raise HTTPException(403, "Acesso não autorizado para este papel")
+        return user
+    return _dep
+
+
+require_admin = require_role("admin")
+require_player = require_role("player")
 
 
 def set_auth_cookie(response: Response, token: str):
@@ -182,6 +213,7 @@ class PlannedSessionIn(BaseModel):
 # ---------------------- Auth Routes ----------------------
 @api.post("/auth/register")
 async def register(data: RegisterIn, response: Response):
+    """Register a new coach. New accounts start as `pending` and require admin validation before login."""
     email = data.email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(400, "Email já registado")
@@ -192,12 +224,19 @@ async def register(data: RegisterIn, response: Response):
         "password_hash": hash_password(data.password),
         "name": data.name,
         "role": "coach",
+        "status": "pending",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.users.insert_one(doc)
-    token = create_access_token(user_id, email)
-    set_auth_cookie(response, token)
-    return {"id": user_id, "email": email, "name": data.name, "role": "coach", "token": token}
+    # Do NOT issue a token — user must be validated by an admin first.
+    return {
+        "id": user_id,
+        "email": email,
+        "name": data.name,
+        "role": "coach",
+        "status": "pending",
+        "message": "Conta criada. Aguarda validação por um administrador.",
+    }
 
 
 @api.post("/auth/login")
@@ -206,13 +245,27 @@ async def login(data: LoginIn, response: Response):
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(data.password, user["password_hash"]):
         raise HTTPException(401, "Credenciais inválidas")
+    status = user.get("status", "pending")
+    if status == "pending":
+        raise HTTPException(403, "A sua conta aguarda validação por um administrador.")
+    if status == "suspended":
+        raise HTTPException(403, "Conta suspensa. Contacte o administrador.")
+    if status != "active":
+        raise HTTPException(403, "Conta indisponível")
     token = create_access_token(user["id"], email)
     set_auth_cookie(response, token)
+    # Track last login
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"last_login_at": datetime.now(timezone.utc).isoformat()}},
+    )
     return {
         "id": user["id"],
         "email": email,
         "name": user.get("name"),
         "role": user.get("role", "coach"),
+        "status": status,
+        "athlete_id": user.get("athlete_id"),
         "token": token,
     }
 
@@ -489,6 +542,9 @@ async def delete_athlete(athlete_id: str, user=Depends(get_current_user)):
     await db.athletes.delete_one({"id": athlete_id, "team_id": team["id"]})
     await db.sessions.delete_many({"athlete_id": athlete_id})
     await db.injuries.delete_many({"athlete_id": athlete_id})
+    # Cascade: linked player user account + any invites
+    await db.users.delete_many({"role": "player", "athlete_id": athlete_id})
+    await db.invites.delete_many({"athlete_id": athlete_id})
     return {"ok": True}
 
 
@@ -1939,6 +1995,292 @@ async def reset_all(user=Depends(get_current_user)):
     return {"ok": True, "deleted": counts}
 
 
+# ============================================================
+# ADMIN ENDPOINTS — manage user accounts (validate/suspend/delete)
+# ============================================================
+@api.get("/admin/users")
+async def admin_list_users(admin=Depends(require_admin)):
+    """List all users with summary stats. Admin only."""
+    users = await db.users.find({}, {"password_hash": 0, "_id": 0}).sort("created_at", 1).to_list(500)
+    out = []
+    for u in users:
+        teams_n = await db.teams.count_documents({"user_id": u["id"]})
+        athletes_n = 0
+        sessions_n = 0
+        if teams_n:
+            team_ids = [t["id"] async for t in db.teams.find({"user_id": u["id"]}, {"id": 1})]
+            athletes_n = await db.athletes.count_documents({"team_id": {"$in": team_ids}})
+            sessions_n = await db.sessions.count_documents({"team_id": {"$in": team_ids}})
+        out.append({
+            **u,
+            "stats": {"teams": teams_n, "athletes": athletes_n, "sessions": sessions_n},
+        })
+    return out
+
+
+@api.post("/admin/users/{user_id}/validate")
+async def admin_validate_user(user_id: str, admin=Depends(require_admin)):
+    target = await db.users.find_one({"id": user_id})
+    if not target:
+        raise HTTPException(404, "Utilizador não encontrado")
+    if target.get("role") == "admin":
+        raise HTTPException(400, "Não é possível alterar status de um admin")
+    await db.users.update_one({"id": user_id}, {"$set": {"status": "active"}})
+    return {"ok": True, "id": user_id, "status": "active"}
+
+
+@api.post("/admin/users/{user_id}/suspend")
+async def admin_suspend_user(user_id: str, admin=Depends(require_admin)):
+    target = await db.users.find_one({"id": user_id})
+    if not target:
+        raise HTTPException(404, "Utilizador não encontrado")
+    if target.get("role") == "admin":
+        raise HTTPException(400, "Não é possível suspender um admin")
+    await db.users.update_one({"id": user_id}, {"$set": {"status": "suspended"}})
+    return {"ok": True, "id": user_id, "status": "suspended"}
+
+
+@api.post("/admin/users/{user_id}/reactivate")
+async def admin_reactivate_user(user_id: str, admin=Depends(require_admin)):
+    target = await db.users.find_one({"id": user_id})
+    if not target:
+        raise HTTPException(404, "Utilizador não encontrado")
+    await db.users.update_one({"id": user_id}, {"$set": {"status": "active"}})
+    return {"ok": True, "id": user_id, "status": "active"}
+
+
+@api.delete("/admin/users/{user_id}")
+async def admin_delete_user(user_id: str, admin=Depends(require_admin)):
+    """Cascading delete: removes the user and ALL their data (teams, athletes, sessions, injuries, invites)."""
+    target = await db.users.find_one({"id": user_id})
+    if not target:
+        raise HTTPException(404, "Utilizador não encontrado")
+    if target.get("role") == "admin":
+        raise HTTPException(400, "Não é possível eliminar uma conta de admin")
+
+    if target.get("role") == "player":
+        # Player account: only delete invite link (athlete stays under coach)
+        await db.invites.update_many({"player_user_id": user_id}, {"$unset": {"player_user_id": ""}})
+        await db.users.delete_one({"id": user_id})
+        return {"ok": True}
+
+    # Coach: cascade everything
+    team_ids = [t["id"] async for t in db.teams.find({"user_id": user_id}, {"id": 1})]
+    athlete_ids = []
+    if team_ids:
+        athlete_ids = [a["id"] async for a in db.athletes.find({"team_id": {"$in": team_ids}}, {"id": 1})]
+    if athlete_ids:
+        await db.sessions.delete_many({"athlete_id": {"$in": athlete_ids}})
+        await db.injuries.delete_many({"athlete_id": {"$in": athlete_ids}})
+        await db.invites.delete_many({"athlete_id": {"$in": athlete_ids}})
+        # Delete player users linked to these athletes
+        await db.users.delete_many({"role": "player", "athlete_id": {"$in": athlete_ids}})
+        await db.athletes.delete_many({"id": {"$in": athlete_ids}})
+    if team_ids:
+        await db.planned_sessions.delete_many({"team_id": {"$in": team_ids}})
+        await db.teams.delete_many({"id": {"$in": team_ids}})
+    await db.users.delete_one({"id": user_id})
+    return {"ok": True}
+
+
+# ============================================================
+# ATHLETE INVITE ENDPOINTS
+# ============================================================
+def _generate_invite_token() -> str:
+    """Short URL-safe token (24 chars) for athlete invites."""
+    import secrets
+    return secrets.token_urlsafe(18)
+
+
+@api.post("/athletes/{athlete_id}/invite")
+async def create_or_refresh_invite(athlete_id: str, user=Depends(get_current_user)):
+    """Coach generates (or refreshes) the invite link for an athlete. Returns the token + full URL."""
+    if user.get("role") != "coach":
+        raise HTTPException(403, "Apenas treinadores podem gerar convites")
+    team = await _get_team_or_404(user)
+    athlete = await db.athletes.find_one({"id": athlete_id, "team_id": team["id"]}, {"_id": 0})
+    if not athlete:
+        raise HTTPException(404, "Atleta não encontrado")
+    # Check if there's already a linked player account
+    linked_player = await db.users.find_one({"role": "player", "athlete_id": athlete_id})
+    if linked_player:
+        return {
+            "linked": True,
+            "player_email": linked_player.get("email"),
+            "athlete_id": athlete_id,
+        }
+    # (Re)issue a token — delete any previous unused invite
+    await db.invites.delete_many({"athlete_id": athlete_id})
+    token = _generate_invite_token()
+    await db.invites.insert_one({
+        "token": token,
+        "athlete_id": athlete_id,
+        "team_id": team["id"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    base_url = os.environ.get("FRONTEND_PUBLIC_URL", "").rstrip("/")
+    url = f"{base_url}/convite/{token}" if base_url else f"/convite/{token}"
+    return {"linked": False, "token": token, "url": url, "athlete_id": athlete_id, "athlete_name": athlete["name"]}
+
+
+@api.get("/invite/{token}")
+async def get_invite_info(token: str):
+    """Public — returns athlete and team info for the invite landing page."""
+    invite = await db.invites.find_one({"token": token}, {"_id": 0})
+    if not invite:
+        raise HTTPException(404, "Convite inválido ou expirado")
+    athlete = await db.athletes.find_one({"id": invite["athlete_id"]}, {"_id": 0})
+    team = await db.teams.find_one({"id": invite["team_id"]}, {"_id": 0})
+    if not athlete or not team:
+        raise HTTPException(404, "Convite associado a dados eliminados")
+    # If a player account already linked, invite is consumed
+    linked = await db.users.find_one({"role": "player", "athlete_id": invite["athlete_id"]})
+    if linked:
+        raise HTTPException(410, "Este convite já foi utilizado")
+    return {
+        "athlete_name": athlete["name"],
+        "athlete_id": athlete["id"],
+        "team_name": team["name"],
+        "team_escalao": team.get("escalao"),
+    }
+
+
+class InviteAcceptIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6)
+    name: Optional[str] = None
+
+
+@api.post("/invite/{token}/accept")
+async def accept_invite(token: str, data: InviteAcceptIn, response: Response):
+    """Public — player creates their account using the invite token. Auto-activated, no admin step."""
+    invite = await db.invites.find_one({"token": token}, {"_id": 0})
+    if not invite:
+        raise HTTPException(404, "Convite inválido ou expirado")
+    # Ensure the athlete still exists
+    athlete = await db.athletes.find_one({"id": invite["athlete_id"]}, {"_id": 0})
+    if not athlete:
+        raise HTTPException(404, "Atleta associado já não existe")
+    # Ensure no player linked yet
+    linked = await db.users.find_one({"role": "player", "athlete_id": invite["athlete_id"]})
+    if linked:
+        raise HTTPException(410, "Este convite já foi utilizado")
+    email = data.email.lower()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(400, "Email já registado")
+    user_id = str(uuid.uuid4())
+    doc = {
+        "id": user_id,
+        "email": email,
+        "password_hash": hash_password(data.password),
+        "name": data.name or athlete["name"],
+        "role": "player",
+        "status": "active",
+        "athlete_id": invite["athlete_id"],
+        "team_id": invite["team_id"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(doc)
+    await db.invites.update_one({"token": token}, {"$set": {"player_user_id": user_id, "accepted_at": datetime.now(timezone.utc).isoformat()}})
+    access = create_access_token(user_id, email)
+    set_auth_cookie(response, access)
+    return {
+        "id": user_id,
+        "email": email,
+        "name": doc["name"],
+        "role": "player",
+        "status": "active",
+        "athlete_id": invite["athlete_id"],
+        "token": access,
+    }
+
+
+# ============================================================
+# PLAYER ENDPOINTS — restricted to own data
+# ============================================================
+@api.get("/player/me")
+async def player_me(user=Depends(require_player)):
+    """Returns the player's athlete + team info (name, position, team)."""
+    athlete = await db.athletes.find_one({"id": user["athlete_id"]}, {"_id": 0}) if user.get("athlete_id") else None
+    team = await db.teams.find_one({"id": user["team_id"]}, {"_id": 0}) if user.get("team_id") else None
+    return {
+        "user": user,
+        "athlete": athlete,
+        "team": {"name": team.get("name"), "escalao": team.get("escalao"), "epoca": team.get("epoca")} if team else None,
+    }
+
+
+@api.get("/player/sessions")
+async def player_list_sessions(user=Depends(require_player)):
+    """List the player's own sessions, NEWEST FIRST, without computed load fields."""
+    if not user.get("athlete_id"):
+        return []
+    cursor = db.sessions.find({"athlete_id": user["athlete_id"]}, {"_id": 0}).sort("date", -1)
+    out = []
+    async for s in cursor:
+        # Strip load info from player view per requirement (B = hide carga completely)
+        out.append({
+            "id": s["id"],
+            "date": s["date"],
+            "session_type": s.get("session_type", "training"),
+            "rpe": s.get("rpe"),
+            "duration_min": s.get("duration_min"),
+            "sleep_quality": s.get("sleep_quality"),
+            "wellness": s.get("wellness"),
+            "notes": s.get("notes"),
+        })
+    return out
+
+
+class PlayerSessionIn(BaseModel):
+    date: str
+    session_type: str = "training"
+    rpe: int = Field(ge=1, le=10)
+    duration_min: int = Field(ge=1, le=600)
+    sleep_quality: Optional[int] = Field(default=None, ge=1, le=5)
+    wellness: Optional[int] = Field(default=None, ge=1, le=10)
+    notes: Optional[str] = None
+
+
+@api.post("/player/sessions")
+async def player_create_session(data: PlayerSessionIn, user=Depends(require_player)):
+    """Player registers their OWN session (no athlete_id override possible)."""
+    if not user.get("athlete_id") or not user.get("team_id"):
+        raise HTTPException(400, "Conta sem atleta associado")
+    if data.session_type not in {"training", "match", "gym", "recovery"}:
+        raise HTTPException(400, "Tipo de sessão inválido")
+    load = int(data.rpe) * int(data.duration_min)
+    session_id = str(uuid.uuid4())
+    doc = {
+        "id": session_id,
+        "athlete_id": user["athlete_id"],
+        "team_id": user["team_id"],
+        "date": data.date,
+        "session_type": data.session_type,
+        "rpe": data.rpe,
+        "duration_min": data.duration_min,
+        "load": load,
+        "sleep_quality": data.sleep_quality,
+        "wellness": data.wellness,
+        "notes": data.notes,
+        "created_by": "player",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.sessions.insert_one(doc)
+    # Return WITHOUT load
+    return {k: v for k, v in doc.items() if k not in {"load", "_id"}}
+
+
+@api.delete("/player/sessions/{session_id}")
+async def player_delete_session(session_id: str, user=Depends(require_player)):
+    """Allow player to delete a session they own. Coach-created sessions also OK if athlete_id matches."""
+    sess = await db.sessions.find_one({"id": session_id, "athlete_id": user.get("athlete_id")})
+    if not sess:
+        raise HTTPException(404, "Sessão não encontrada")
+    await db.sessions.delete_one({"id": session_id})
+    return {"ok": True}
+
+
 # ---------------------- Startup ----------------------
 @app.on_event("startup")
 async def on_startup():
@@ -1948,26 +2290,39 @@ async def on_startup():
     await db.sessions.create_index([("athlete_id", 1), ("date", -1)])
     await db.planned_sessions.create_index([("team_id", 1), ("date", 1)])
     await db.injuries.create_index([("team_id", 1), ("athlete_id", 1)])
+    await db.invites.create_index("token", unique=True)
+    await db.invites.create_index("athlete_id")
 
-    # seed admin
-    admin_email = os.environ.get("ADMIN_EMAIL", "treinador@futsal.pt").lower()
-    admin_pwd = os.environ.get("ADMIN_PASSWORD", "treinador123")
-    existing = await db.users.find_one({"email": admin_email})
-    if not existing:
+    # --- Migration: add role/status defaults for legacy users ---
+    await db.users.update_many(
+        {"role": {"$exists": False}},
+        {"$set": {"role": "coach"}},
+    )
+    await db.users.update_many(
+        {"status": {"$exists": False}},
+        {"$set": {"status": "pending"}},
+    )
+
+    # --- Bootstrap admin account ---
+    ADMIN_BOOTSTRAP_EMAIL = "pedrompsantos84@gmail.com"
+    ADMIN_BOOTSTRAP_PWD = "amarense"
+    existing_admin = await db.users.find_one({"email": ADMIN_BOOTSTRAP_EMAIL})
+    if not existing_admin:
         await db.users.insert_one({
             "id": str(uuid.uuid4()),
-            "email": admin_email,
-            "password_hash": hash_password(admin_pwd),
-            "name": "Treinador Principal",
-            "role": "coach",
+            "email": ADMIN_BOOTSTRAP_EMAIL,
+            "password_hash": hash_password(ADMIN_BOOTSTRAP_PWD),
+            "name": "Administrador",
+            "role": "admin",
+            "status": "active",
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
     else:
-        if not verify_password(admin_pwd, existing["password_hash"]):
-            await db.users.update_one(
-                {"email": admin_email},
-                {"$set": {"password_hash": hash_password(admin_pwd)}},
-            )
+        # Ensure admin role + active status are enforced
+        await db.users.update_one(
+            {"email": ADMIN_BOOTSTRAP_EMAIL},
+            {"$set": {"role": "admin", "status": "active"}},
+        )
 
 
 @app.on_event("shutdown")

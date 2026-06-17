@@ -11,16 +11,36 @@ export default function Register() {
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [loading, setLoading] = useState(false);
 
+  const [submitted, setSubmitted] = useState(false);
+
   async function onSubmit(e) {
     e.preventDefault();
     setLoading(true);
     try {
       await register(form.email, form.password, form.name);
-      toast.success("Conta criada");
-      navigate("/");
+      setSubmitted(true);
+      toast.success("Conta criada. Aguarda validação.");
     } catch (err) {
       toast.error(formatApiError(err));
     } finally { setLoading(false); }
+  }
+
+  if (submitted) {
+    return (
+      <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center p-6 grain">
+        <div className="w-full max-w-md text-center relative z-[2]" data-testid="register-pending">
+          <div className="w-12 h-12 bg-[#CCFF00] flex items-center justify-center mx-auto mb-6">
+            <Activity className="w-7 h-7 text-black" strokeWidth={3} />
+          </div>
+          <div className="text-xs text-[#CCFF00] tracking-[0.3em] uppercase mb-3">Aguarda Validação</div>
+          <h2 className="font-head text-3xl font-black mb-4">CONTA CRIADA</h2>
+          <p className="text-[#A3A3A3] text-sm mb-8">
+            A sua conta foi registada com sucesso. Um administrador irá validá-la em breve. Receberá acesso assim que aprovada.
+          </p>
+          <Link to="/login" className="fld-btn-primary inline-block">VOLTAR AO LOGIN</Link>
+        </div>
+      </div>
+    );
   }
 
   return (

@@ -30,7 +30,13 @@ export function AuthProvider({ children }) {
   }
 
   async function register(email, password, name) {
+    // New users land on `pending` status — backend does NOT issue a token.
     const { data } = await http.post("/auth/register", { email, password, name });
+    return data; // do not set user — they must wait for admin validation
+  }
+
+  async function acceptInvite(token, email, password, name) {
+    const { data } = await http.post(`/invite/${token}/accept`, { email, password, name });
     if (data.token) localStorage.setItem("fld_token", data.token);
     setUser(data);
     return data;
@@ -43,7 +49,17 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthCtx.Provider value={{ user, loading, login, register, logout }}>
+    <AuthCtx.Provider value={{
+      user,
+      loading,
+      login,
+      register,
+      acceptInvite,
+      logout,
+      isAdmin: user && user.role === "admin",
+      isCoach: user && user.role === "coach",
+      isPlayer: user && user.role === "player",
+    }}>
       {children}
     </AuthCtx.Provider>
   );

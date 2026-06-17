@@ -8,17 +8,19 @@ import { Activity } from "lucide-react";
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("treinador@futsal.pt");
-  const [password, setPassword] = useState("treinador123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function onSubmit(e) {
     e.preventDefault();
     setLoading(true);
     try {
-      await login(email, password);
+      const u = await login(email, password);
       toast.success("Sessão iniciada");
-      navigate("/");
+      if (u.role === "admin") navigate("/admin");
+      else if (u.role === "player") navigate("/atleta");
+      else navigate("/");
     } catch (err) {
       toast.error(formatApiError(err));
     } finally { setLoading(false); }
@@ -97,8 +99,8 @@ export default function Login() {
           </div>
 
           <div className="mt-10 p-4 border border-white/5 text-xs text-[#525252]">
-            <div className="font-head tracking-widest text-[#A3A3A3] mb-1">DEMO</div>
-            Conta de teste pré-criada: <span className="text-white">treinador@futsal.pt / treinador123</span>
+            <div className="font-head tracking-widest text-[#A3A3A3] mb-1">VALIDAÇÃO</div>
+            Novas contas precisam de ser validadas por um administrador antes do primeiro acesso.
           </div>
         </form>
       </div>
