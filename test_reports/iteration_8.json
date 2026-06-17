@@ -1,0 +1,42 @@
+{
+  "summary": "Frontend e2e testing of multi-team switcher, redesigned Calendar (cor por tipo de sessão + date range picker) and Copiar Último Treino button. 8/8 main flows pass. One non-idempotent backend seed endpoint flagged as code review item.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/seed/demo", "issue": "Não é idempotente. Cada chamada cria uma nova equipa com o mesmo nome 'Sporting Futsal Lisboa' (8 atletas + 266 sessões cada). Conta de teste ficou com 2 equipas Sporting duplicadas. Deve verificar se a equipa demo já existe (por marker, ex. is_demo=true ou name+coach) e reutilizar."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Tornar POST /api/seed/demo idempotente (verificar se já existe equipa demo do utilizador antes de criar nova) — opcional mas evita poluição de dados em re-execuções."
+  ],
+  "critical_code_review_comments": [
+    "TeamSwitcher.jsx (linha 47) usa window.location.reload(); cumpre o requisito mas força full reload — alternativa seria invalidar caches React Query / refetch context. Aceitável para MVP.",
+    "Calendar.jsx loadIntensity() retorna 0 (transparente) para load=0; isto faz células com sessão mas carga=0 ficarem sem cor — não bloqueador.",
+    "LogSession.jsx copyLastSession() chama GET /api/sessions?athlete_id=X e assume [0] como mais recente; depende de ordenação backend (decrescente por data). Backend já ordena correctamente segundo análise empírica (última sessão = 2026-06-16 trazida em [0]).",
+    "/api/seed/demo não idempotente: cria duplicados ao re-chamar (ver minor backend issue)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (rotas usadas pelos flows)", "frontend": "100% (8/8 cenários)"},
+  "test_credentials": "treinador@futsal.pt / treinador123 (validadas)",
+  "seed_data_creation": "Criada equipa de teste 'TEST_TeamVazia_*' via POST /api/teams (limpa ao fim) e atleta 'TEST_AtletaSemSessoes' (limpo ao fim).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Notas: (1) POST /api/seed/demo NÃO é idempotente — re-execuções criam equipas duplicadas. Para testes limpos use POST /api/teams para criar equipa de teste e POST /api/teams/{id}/activate. (2) Após troca de equipa via TeamSwitcher há window.location.reload(); aguardar ≥4s antes de verificar active-team-name. (3) Copiar Último Treino: toast 'Copiado da última sessão de {atleta} ({data})' quando há histórico, 'Este atleta ainda não tem sessões registadas' quando não há. (4) Calendar default mode = month; cell background = rgba(SESSION_TYPE_COLOR, intensity). (5) Data isolation por equipa: confirmado /api/athletes e /api/sessions só devolvem dados da equipa active.",
+  "test_results_detail": {
+    "T1_login_and_switcher": "PASS — Login OK, sidebar mostra TeamSwitcher com 'EQUIPA ATIVA' label e nome em data-testid=active-team-name.",
+    "T2_dropdown": "PASS — Dropdown abre, lista equipas com check na ativa, botão 'Gerir equipas' presente (data-testid=team-switcher-manage).",
+    "T3_create_second_team": "PASS — Nova equipa criada via /api/teams aparece imediatamente no dropdown (count 2→3). UI de criação em /equipa não foi exercida via clique, mas backend POST /api/teams responde 200 e dropdown refrescou após reload.",
+    "T4_switch_team": "PASS — Clique em data-testid=team-switcher-item-{id} chama POST /api/teams/{id}/activate, página recarrega, active-team-name atualiza para a nova equipa e dashboard mostra dados da nova equipa (0 atletas para equipa vazia).",
+    "T5_calendar_month": "PASS — /calendario carrega em modo Mês por defeito. Células com sessões têm fundo colorido (rgba com alpha 0.10-0.55) baseado em SESSION_TYPES + dominantType. Número de carga colorido por loadTextColor (cinza/lime/amarelo/laranja/vermelho).",
+    "T6_calendar_range": "PASS — Toggle data-testid=cal-mode-range mostra cal-range-start, cal-range-end, presets 7D/30D/90D. Alterações de data e presets re-fazem fetch /api/calendar e atualizam 'Carga Total no Período' e 'Dias Ativos'. Meses fora do intervalo ficam com opacity-15 (esbatidos) e botões disabled.",
+    "T7_copy_last_with_history": "PASS — Click em data-testid=copy-last-session preenche session_type, rpe (6), duration_min (60), sleep_quality (3), wellness (9). Toast verde 'Copiado da última sessão de João Silva (2026-06-16)'. Submit gera 'Sessão registada — Carga 360 UA'.",
+    "T8_copy_last_no_history": "PASS — Para atleta sem sessões, toast 'Este atleta ainda não tem sessões registadas' e o formulário NÃO é alterado (duration mantém 37).",
+    "T8b_data_isolation": "PASS — Após switch para equipa vazia, GET /api/athletes=[] e /api/sessions=[]. Após voltar para equipa demo, athletes=8, sessions=266."
+  }
+}

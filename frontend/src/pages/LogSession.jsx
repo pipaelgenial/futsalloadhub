@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
+import { Copy } from "lucide-react";
 import { SESSION_TYPES, SESSION_TYPE_ORDER } from "@/components/Bits";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -72,6 +73,7 @@ export default function LogSession() {
     notes: "",
   });
   const [saving, setSaving] = useState(false);
+  const [copying, setCopying] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -82,6 +84,31 @@ export default function LogSession() {
       } catch (err) { toast.error(formatApiError(err)); }
     })();
   }, []);
+
+  async function copyLastSession() {
+    if (!form.athlete_id) { toast.error("Selecione um atleta primeiro"); return; }
+    setCopying(true);
+    try {
+      const { data } = await http.get(`/sessions?athlete_id=${form.athlete_id}`);
+      const last = data?.[0];
+      if (!last) {
+        toast.info("Este atleta ainda não tem sessões registadas");
+        return;
+      }
+      setForm((f) => ({
+        ...f,
+        session_type: last.session_type || "training",
+        rpe: Number(last.rpe) || 5,
+        duration_min: Number(last.duration_min) || 75,
+        sleep_quality: Number(last.sleep_quality) || 4,
+        wellness: Number(last.wellness) || 7,
+        notes: "",
+      }));
+      const athlete = athletes.find((a) => a.id === form.athlete_id);
+      toast.success(`Copiado da última sessão de ${athlete?.name || "atleta"} (${last.date})`);
+    } catch (err) { toast.error(formatApiError(err)); }
+    finally { setCopying(false); }
+  }
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -131,6 +158,21 @@ export default function LogSession() {
               <label className="fld-label">Data</label>
               <input className="fld-input" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required data-testid="session-date" />
             </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 -mt-1 pb-1 border-b border-white/5">
+            <div className="text-[10px] uppercase tracking-widest text-[#525252]">
+              Preencher rapidamente com a última sessão do atleta
+            </div>
+            <button
+              type="button"
+              onClick={copyLastSession}
+              disabled={copying || !form.athlete_id}
+              data-testid="copy-last-session"
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-[#CCFF00]/40 text-[#CCFF00] hover:bg-[#CCFF00]/10 font-head text-[11px] uppercase tracking-widest transition-all disabled:opacity-40"
+            >
+              <Copy className="w-3.5 h-3.5" /> {copying ? "A copiar..." : "Copiar Último Treino"}
+            </button>
           </div>
 
           <div>
