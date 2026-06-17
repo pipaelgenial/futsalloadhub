@@ -309,7 +309,12 @@ async def create_team(data: TeamIn, user=Depends(get_current_user)):
     if count >= MAX_TEAMS_PER_USER:
         raise HTTPException(400, f"Limite de {MAX_TEAMS_PER_USER} equipas atingido")
     team_id = str(uuid.uuid4())
-    thresholds = _sanitize_thresholds(data.load_thresholds) or DEFAULT_LOAD_THRESHOLDS
+    if data.load_thresholds is not None:
+        thresholds = _sanitize_thresholds(data.load_thresholds)
+        if not thresholds:
+            raise HTTPException(400, "Limiares inválidos — devem ser inteiros positivos crescentes")
+    else:
+        thresholds = DEFAULT_LOAD_THRESHOLDS
     doc = {
         "id": team_id,
         "user_id": user["id"],

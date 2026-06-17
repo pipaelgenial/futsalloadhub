@@ -107,7 +107,13 @@ e estilo dashboard.
 - **TeamSwitcher dinâmico**: refetch de `/api/teams` ao mudar de rota E ao abrir o dropdown — equipas novas/eliminadas refletem sem reload.
 - **TeamProfile sem botão ATIVAR**: trocar equipa é exclusivamente via o switcher na sidebar (UX unificada).
 
-## Phase 9 — Deferred
+## Phase 9 — Configurable Load Thresholds (17 Jun 2026)
+- **Limiares de carga por equipa**: novo campo `load_thresholds = {ideal, moderate, high, very_high}` (UA/atleta/dia) com defaults 300/600/900/1200. Persistido em MongoDB.
+- **Backend**: POST/PUT /api/teams aceitam `load_thresholds`; validação no `_sanitize_thresholds` (positivos e estritamente crescentes); GET /api/team e /api/teams aplicam defaults quando ausentes.
+- **Frontend TeamProfile**: form de edição com 4 inputs coloridos + 5 presets por escalão (Sub-13: 200/400/600/800, Sub-15: 250/500/750/1000, Sub-17: 300/600/900/1200, Sub-19: 350/700/1050/1400, Sénior: 400/800/1200/1600) + botão "Repor 300/600/900/1200". Validação local impede save com limiares não-crescentes.
+- **Calendar**: busca os limiares da equipa ativa via GET /api/team. `loadTextColor` e `loadIntensity` recebem `th` como parâmetro. Legenda atualiza dinamicamente com os limiares configurados.
+
+## Phase 10 — Deferred
 ### P0
 - **Resumo Mensal Automático**: para cada atleta, média de carga e qualidade do sono
   por mês, com destaque de evolução (delta vs. mês anterior)
