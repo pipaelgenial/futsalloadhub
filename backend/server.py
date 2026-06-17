@@ -210,22 +210,47 @@ async def me(user=Depends(get_current_user)):
     return user
 
 
+MAX_TEAMS_PER_USER = 5
+TEAM_LOGO_DIR = ROOT_DIR / "uploads" / "teams"
+TEAM_LOGO_DIR.mkdir(parents=True, exist_ok=True)
+
+
+async def _get_active_team(user, required: bool = True):
+    """Return the user's active team (by users.active_team_id), or first team as fallback.
+    Auto-activates the first team if active_team_id is missing/invalid."""
+    active_id = user.get("active_team_id")
+    team = None
+    if active_id:
+        team = await db.teams.find_one({"id": active_id, "user_id": user["id"]})
+    if not team:
+        team = await db.teams.find_one({"user_id": user["id"]})
+        if team:
+            await db.users.update_one({"id": user["id"]}, {"$set": {"active_team_id": team["id"]}})
+    if not team and required:
+        raise HTTPException(400, "Insira dados da equipa primeiro")
+    return team
+
+
 # ---------------------- Team ----------------------
 @api.get("/team")
 async def get_team(user=Depends(get_current_user)):
-    team = await db.teams.find_one({"user_id": user["id"]}, {"_id": 0})
-    return team  # may be None
+    """Returns ACTIVE team (back-compat single-team API)."""
+    team = await _get_active_team(user, required=False)
+    if team:
+        team.pop("_id", None)
+    return team
 
 
 @api.post("/team")
 async def upsert_team(data: TeamIn, user=Depends(get_current_user)):
-    existing = await db.teams.find_one({"user_id": user["id"]})
-    if existing:
+    """Upserts active team (back-compat). If no teams exist, creates the first."""
+    active = await _get_active_team(user, required=False)
+    if active:
         await db.teams.update_one(
-            {"user_id": user["id"]},
+            {"id": active["id"]},
             {"$set": {"name": data.name, "escalao": data.escalao, "epoca": data.epoca}},
         )
-        team = await db.teams.find_one({"user_id": user["id"]}, {"_id": 0})
+        team = await db.teams.find_one({"id": active["id"]}, {"_id": 0})
         return team
     team_id = str(uuid.uuid4())
     doc = {
@@ -237,21 +262,162 @@ async def upsert_team(data: TeamIn, user=Depends(get_current_user)):
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.teams.insert_one(doc)
+    await db.users.update_one({"id": user["id"]}, {"$set": {"active_team_id": team_id}})
     doc.pop("_id", None)
     return doc
 
 
+@api.get("/teams")
+async def list_teams(user=Depends(get_current_user)):
+    """List all teams for the current user, with active flag."""
+    # ensure active_team_id is set if user has at least one team
+    await _get_active_team(user, required=False)
+    refreshed = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    active_id = refreshed.get("active_team_id") if refreshed else None
+    teams = await db.teams.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", 1).to_list(20)
+    for t in teams:
+        t["active"] = (t["id"] == active_id)
+    return teams
+
+
+@api.post("/teams")
+async def create_team(data: TeamIn, user=Depends(get_current_user)):
+    """Create a new team (max 5 per user). Newly-created team becomes active."""
+    count = await db.teams.count_documents({"user_id": user["id"]})
+    if count >= MAX_TEAMS_PER_USER:
+        raise HTTPException(400, f"Limite de {MAX_TEAMS_PER_USER} equipas atingido")
+    team_id = str(uuid.uuid4())
+    doc = {
+        "id": team_id,
+        "user_id": user["id"],
+        "name": data.name,
+        "escalao": data.escalao,
+        "epoca": data.epoca,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.teams.insert_one(doc)
+    await db.users.update_one({"id": user["id"]}, {"$set": {"active_team_id": team_id}})
+    doc.pop("_id", None)
+    doc["active"] = True
+    return doc
+
+
+@api.put("/teams/{team_id}")
+async def update_team_by_id(team_id: str, data: TeamIn, user=Depends(get_current_user)):
+    existing = await db.teams.find_one({"id": team_id, "user_id": user["id"]})
+    if not existing:
+        raise HTTPException(404, "Equipa não encontrada")
+    await db.teams.update_one(
+        {"id": team_id},
+        {"$set": {"name": data.name, "escalao": data.escalao, "epoca": data.epoca}},
+    )
+    refreshed = await db.teams.find_one({"id": team_id}, {"_id": 0})
+    return refreshed
+
+
+@api.delete("/teams/{team_id}")
+async def delete_team_by_id(team_id: str, user=Depends(get_current_user)):
+    existing = await db.teams.find_one({"id": team_id, "user_id": user["id"]})
+    if not existing:
+        raise HTTPException(404, "Equipa não encontrada")
+    # cascade delete
+    async for a in db.athletes.find({"team_id": team_id}):
+        if a.get("photo_path"):
+            try:
+                (UPLOAD_DIR / a["photo_path"]).unlink(missing_ok=True)
+            except Exception:
+                pass
+    if existing.get("logo_path"):
+        try:
+            (TEAM_LOGO_DIR / existing["logo_path"]).unlink(missing_ok=True)
+        except Exception:
+            pass
+    await db.sessions.delete_many({"team_id": team_id})
+    await db.athletes.delete_many({"team_id": team_id})
+    await db.injuries.delete_many({"team_id": team_id})
+    await db.planned_sessions.delete_many({"team_id": team_id})
+    await db.teams.delete_one({"id": team_id})
+    # if active was this team, switch to another (first available)
+    if user.get("active_team_id") == team_id:
+        other = await db.teams.find_one({"user_id": user["id"]})
+        await db.users.update_one(
+            {"id": user["id"]},
+            {"$set": {"active_team_id": other["id"] if other else None}},
+        )
+    return {"ok": True}
+
+
+@api.post("/teams/{team_id}/activate")
+async def activate_team(team_id: str, user=Depends(get_current_user)):
+    existing = await db.teams.find_one({"id": team_id, "user_id": user["id"]})
+    if not existing:
+        raise HTTPException(404, "Equipa não encontrada")
+    await db.users.update_one({"id": user["id"]}, {"$set": {"active_team_id": team_id}})
+    return {"ok": True, "active_team_id": team_id}
+
+
+@api.post("/teams/{team_id}/logo")
+async def upload_team_logo(team_id: str, file: UploadFile = File(...), user=Depends(get_current_user)):
+    team = await db.teams.find_one({"id": team_id, "user_id": user["id"]})
+    if not team:
+        raise HTTPException(404, "Equipa não encontrada")
+    ext = (file.filename.rsplit(".", 1)[-1] or "").lower() if file.filename else ""
+    if ext not in ALLOWED_IMG_EXT:
+        raise HTTPException(400, "Formato inválido. Use JPG, PNG ou WebP")
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(400, "Imagem demasiado grande (máx 5MB)")
+    if team.get("logo_path"):
+        try:
+            (TEAM_LOGO_DIR / team["logo_path"]).unlink(missing_ok=True)
+        except Exception:
+            pass
+    filename = f"{team_id}_{uuid.uuid4().hex[:8]}.{ext}"
+    (TEAM_LOGO_DIR / filename).write_bytes(data)
+    await db.teams.update_one(
+        {"id": team_id},
+        {"$set": {"logo_path": filename, "logo_updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"ok": True, "logo_path": filename, "url": f"/api/teams/{team_id}/logo"}
+
+
+@api.delete("/teams/{team_id}/logo")
+async def remove_team_logo(team_id: str, user=Depends(get_current_user)):
+    team = await db.teams.find_one({"id": team_id, "user_id": user["id"]})
+    if not team:
+        raise HTTPException(404, "Equipa não encontrada")
+    if team.get("logo_path"):
+        try:
+            (TEAM_LOGO_DIR / team["logo_path"]).unlink(missing_ok=True)
+        except Exception:
+            pass
+    await db.teams.update_one({"id": team_id}, {"$set": {"logo_path": None}})
+    return {"ok": True}
+
+
+@api.get("/teams/{team_id}/logo")
+async def get_team_logo(team_id: str):
+    """Public logo endpoint so <img src> works directly."""
+    team = await db.teams.find_one({"id": team_id})
+    if not team or not team.get("logo_path"):
+        raise HTTPException(404, "Sem logo")
+    fp = TEAM_LOGO_DIR / team["logo_path"]
+    if not fp.exists():
+        raise HTTPException(404, "Ficheiro não encontrado")
+    ext = team["logo_path"].rsplit(".", 1)[-1].lower()
+    mt = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
+    return FileResponse(fp, media_type=mt)
+
+
 # ---------------------- Athletes ----------------------
 async def _get_team_or_404(user):
-    team = await db.teams.find_one({"user_id": user["id"]})
-    if not team:
-        raise HTTPException(400, "Insira dados da equipa primeiro")
-    return team
+    """Returns the user's ACTIVE team or raises 400."""
+    return await _get_active_team(user, required=True)
 
 
 @api.get("/athletes")
 async def list_athletes(user=Depends(get_current_user)):
-    team = await db.teams.find_one({"user_id": user["id"]})
+    team = await _get_active_team(user, required=False)
     if not team:
         return []
     athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).to_list(500)
@@ -419,7 +585,7 @@ async def update_session(session_id: str, data: SessionUpdate, user=Depends(get_
 
 @api.get("/sessions")
 async def list_sessions(athlete_id: Optional[str] = None, user=Depends(get_current_user)):
-    team = await db.teams.find_one({"user_id": user["id"]})
+    team = await _get_active_team(user, required=False)
     if not team:
         return []
     q = {"team_id": team["id"]}
@@ -696,7 +862,9 @@ async def analytics_athlete(athlete_id: str, user=Depends(get_current_user)):
 
 @api.get("/analytics/team")
 async def analytics_team(user=Depends(get_current_user)):
-    team = await db.teams.find_one({"user_id": user["id"]}, {"_id": 0})
+    team = await _get_active_team(user, required=False)
+    if team:
+        team = {k: v for k, v in team.items() if k != "_id"}
     if not team:
         return {"team": None, "athletes": [], "summary": {}}
     athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).to_list(500)
@@ -990,7 +1158,7 @@ async def compare_athletes(a1: str, a2: str, user=Depends(get_current_user)):
 # ---------------------- Injuries ----------------------
 @api.get("/injuries")
 async def list_injuries(athlete_id: Optional[str] = None, user=Depends(get_current_user)):
-    team = await db.teams.find_one({"user_id": user["id"]})
+    team = await _get_active_team(user, required=False)
     if not team:
         return []
     q = {"team_id": team["id"]}
@@ -1039,7 +1207,7 @@ async def list_planned(
     end: Optional[str] = None,
     user=Depends(get_current_user),
 ):
-    team = await db.teams.find_one({"user_id": user["id"]})
+    team = await _get_active_team(user, required=False)
     if not team:
         return []
     q = {"team_id": team["id"]}
@@ -1078,7 +1246,9 @@ async def delete_planned(planned_id: str, user=Depends(get_current_user)):
 @api.get("/calendar")
 async def calendar_view(start: str, days: int = 28, user=Depends(get_current_user)):
     """Day-by-day aggregate of recorded sessions and planned sessions for the team."""
-    team = await db.teams.find_one({"user_id": user["id"]}, {"_id": 0})
+    team = await _get_active_team(user, required=False)
+    if team:
+        team = {k: v for k, v in team.items() if k != "_id"}
     if not team:
         return {"team": None, "days": []}
     start_d = _parse_date(start)
@@ -1206,7 +1376,9 @@ def _team_metrics_from_daily(by_day: dict, ref_date: Optional[date] = None) -> d
 async def team_detailed(user=Depends(get_current_user)):
     """Team-wide ACWR series & metrics computed from average per-athlete daily load
     (so the magnitude is comparable to an individual athlete)."""
-    team = await db.teams.find_one({"user_id": user["id"]}, {"_id": 0})
+    team = await _get_active_team(user, required=False)
+    if team:
+        team = {k: v for k, v in team.items() if k != "_id"}
     if not team:
         return {"team": None, "metrics": None, "series": []}
     athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).to_list(500)
@@ -1248,7 +1420,9 @@ async def team_detailed(user=Depends(get_current_user)):
 @api.get("/analytics/weekly/team/overview")
 async def weekly_team_overview(weeks: int = 8, user=Depends(get_current_user)):
     """Team-wide weekly aggregates."""
-    team = await db.teams.find_one({"user_id": user["id"]}, {"_id": 0})
+    team = await _get_active_team(user, required=False)
+    if team:
+        team = {k: v for k, v in team.items() if k != "_id"}
     if not team:
         raise HTTPException(400, "Insira dados da equipa primeiro")
     athletes_count = await db.athletes.count_documents({"team_id": team["id"]})
@@ -1324,7 +1498,9 @@ async def weekly_team_overview(weeks: int = 8, user=Depends(get_current_user)):
 @api.get("/analytics/monthly/team/overview")
 async def monthly_team_overview(months: int = 6, user=Depends(get_current_user)):
     """Team-wide monthly aggregates."""
-    team = await db.teams.find_one({"user_id": user["id"]}, {"_id": 0})
+    team = await _get_active_team(user, required=False)
+    if team:
+        team = {k: v for k, v in team.items() if k != "_id"}
     if not team:
         raise HTTPException(400, "Insira dados da equipa primeiro")
     athletes_count = await db.athletes.count_documents({"team_id": team["id"]})
@@ -1399,8 +1575,8 @@ async def monthly_team_overview(months: int = 6, user=Depends(get_current_user))
 @api.post("/seed/demo")
 async def seed_demo(user=Depends(get_current_user)):
     """Populate demo team, athletes & 45 days of sessions for current user."""
-    # delete existing
-    team = await db.teams.find_one({"user_id": user["id"]})
+    # delete existing — wipes ACTIVE team data
+    team = await _get_active_team(user, required=False)
     if team:
         await db.sessions.delete_many({"team_id": team["id"]})
         await db.athletes.delete_many({"team_id": team["id"]})
@@ -1555,8 +1731,8 @@ async def seed_demo(user=Depends(get_current_user)):
 
 @api.delete("/seed/demo")
 async def clear_data(user=Depends(get_current_user)):
-    """Delete current user's team + athletes + sessions + injuries + photos."""
-    team = await db.teams.find_one({"user_id": user["id"]})
+    """Delete current user's ACTIVE team + athletes + sessions + injuries + photos."""
+    team = await _get_active_team(user, required=False)
     if team:
         # delete athlete photos
         async for a in db.athletes.find({"team_id": team["id"]}):
@@ -1575,8 +1751,8 @@ async def clear_data(user=Depends(get_current_user)):
 
 @api.post("/reset-all")
 async def reset_all(user=Depends(get_current_user)):
-    """Same as clear_data but explicit endpoint name for the 'reset total' button."""
-    team = await db.teams.find_one({"user_id": user["id"]})
+    """Same as clear_data but explicit endpoint name for the 'reset total' button. Operates on ACTIVE team."""
+    team = await _get_active_team(user, required=False)
     counts = {"team": 0, "athletes": 0, "sessions": 0, "injuries": 0, "planned": 0}
     if team:
         async for a in db.athletes.find({"team_id": team["id"]}):
