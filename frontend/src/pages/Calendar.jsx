@@ -7,7 +7,15 @@ import { SESSION_TYPES, SessionTypeBadge } from "@/components/Bits";
 const WEEKDAY_NAMES = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
 const MONTHS_PT = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 
-const isoDate = (d) => d.toISOString().slice(0, 10);
+// Use LOCAL date components — toISOString() converts to UTC which shifts
+// the date by 1 day in PT timezones (WEST/UTC+1) when constructing dates
+// from year/month/day at local midnight.
+const isoDate = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+};
 const today = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
 
 function daysInMonth(year, monthIdx) { return new Date(year, monthIdx + 1, 0).getDate(); }

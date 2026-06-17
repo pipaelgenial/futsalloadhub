@@ -4,10 +4,15 @@ import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 import { SESSION_TYPES, SESSION_TYPE_ORDER } from "@/components/Bits";
 
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export default function PlayerLogSession() {
   const navigate = useNavigate();
   const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
+    date: todayISO(),
     session_type: "training",
     rpe: 5,
     duration_min: 75,

@@ -9,7 +9,10 @@ const SEVERITY_META = {
   high: { label: "Grave", color: "#FF3B30" },
 };
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 export default function InjuriesPanel({ athleteId, refreshKey, onChange }) {
   const [list, setList] = useState([]);
