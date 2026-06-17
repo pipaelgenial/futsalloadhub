@@ -113,7 +113,25 @@ e estilo dashboard.
 - **Frontend TeamProfile**: form de edição com 4 inputs coloridos + 5 presets por escalão (Sub-13: 200/400/600/800, Sub-15: 250/500/750/1000, Sub-17: 300/600/900/1200, Sub-19: 350/700/1050/1400, Sénior: 400/800/1200/1600) + botão "Repor 300/600/900/1200". Validação local impede save com limiares não-crescentes.
 - **Calendar**: busca os limiares da equipa ativa via GET /api/team. `loadTextColor` e `loadIntensity` recebem `th` como parâmetro. Legenda atualiza dinamicamente com os limiares configurados.
 
-## Phase 10 — Deferred
+## Phase 10 — Roles, Admin Panel & Athlete Invites (17 Jun 2026)
+- **Sistema de papéis**: admin, coach, player. Enforcement por path no `get_current_user`: player só /api/auth|player|invite; admin só /api/auth|admin; coach o resto.
+- **Admin bootstrap**: `pedrompsantos84@gmail.com / amarense` criado/forçado a admin+active em cada arranque.
+- **Registo de coaches em pending**: POST /api/auth/register não devolve token; login bloqueia status=pending/suspended com 403.
+- **Admin Panel** (`/admin`): listagem com stats (equipas/atletas/sessões/último login), filtros TODOS/PENDENTE/ATIVO/SUSPENSO + pesquisa, ações validar/suspender/reativar/eliminar, cascade delete completo, admin auto-protegido.
+- **Convite de atleta**:
+  - POST `/api/athletes/{id}/invite` cria/refresha token único
+  - Modal automática ao criar atleta + botão "Convite de acesso" em cada card (página `/atletas`)
+  - Página pública `/convite/{token}` permite o atleta definir email/password
+  - Atleta apagado → conta player + invites apagados (cascade)
+- **Vista de Atleta** (`/atleta`, `/atleta/registar`, `/atleta/historico`):
+  - PlayerShell minimal sem sidebar
+  - Acesso restrito a `/api/player/*` (próprias sessões, sem campo `load`)
+  - 403 ao tentar tocar em endpoints de coach
+  - PlayerHome com stats + última sessão + 2 CTAs
+  - PlayerLogSession (RPE, duração, tipo, sono, bem-estar, notas)
+  - PlayerSessions (histórico NEWEST-FIRST sem coluna de carga)
+
+## Phase 11 — Deferred
 ### P0
 - **Resumo Mensal Automático**: para cada atleta, média de carga e qualidade do sono
   por mês, com destaque de evolução (delta vs. mês anterior)
