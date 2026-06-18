@@ -281,7 +281,7 @@ async def me(user=Depends(get_current_user)):
     return user
 
 
-MAX_TEAMS_PER_USER = 5
+MAX_TEAMS_PER_USER = 5  # platform-wide hard cap; admin can lower per-coach via `max_teams` field
 TEAM_LOGO_DIR = ROOT_DIR / "uploads" / "teams"
 TEAM_LOGO_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -357,10 +357,12 @@ async def list_teams(user=Depends(get_current_user)):
 
 @api.post("/teams")
 async def create_team(data: TeamIn, user=Depends(get_current_user)):
-    """Create a new team (max 5 per user). Newly-created team becomes active."""
+    """Create a new team. Limit is per-user (`max_teams`, default 5, set by admin)."""
     count = await db.teams.count_documents({"user_id": user["id"]})
-    if count >= MAX_TEAMS_PER_USER:
-        raise HTTPException(400, f"Limite de {MAX_TEAMS_PER_USER} equipas atingido")
+    user_limit = int(user.get("max_teams") or MAX_TEAMS_PER_USER)
+    user_limit = min(user_limit, MAX_TEAMS_PER_USER)
+    if count >= user_limit:
+        raise HTTPException(400, f"Limite de {user_limit} equipa(s) atingido para esta conta")
     team_id = str(uuid.uuid4())
     if data.load_thresholds is not None:
         thresholds = _sanitize_thresholds(data.load_thresholds)
@@ -1840,42 +1842,52 @@ async def seed_demo(user=Depends(get_current_user)):
     # 45 days of sessions, ~4 per week
     today = date.today()
     random.seed(42)
+    # Pick 3 athletes to be at HIGH/CRITICAL risk for demo (ACWR > 1.5,
+    # monotony > 2.0, strain > 6000, poor sleep/wellness).
+    high_risk_idx = {0, 2, 5}  # Miguel, Tiago, Bruno (3 of 8)
     sessions_to_insert = []
-    for aid, _ in athlete_ids:
+    for idx, (aid, _) in enumerate(athlete_ids):
+        is_high_risk = idx in high_risk_idx
         for i in range(45, 0, -1):
             d = today - timedelta(days=i)
-            # train Mon/Tue/Thu/Fri (weekdays 0,1,3,4) + match Sat (5) + recovery Sun (6)
             wd = d.weekday()
             train = wd in (0, 1, 3, 4, 5, 6)
             if not train:
                 continue
             if random.random() < 0.15:
                 continue  # absence
+            # ---- Baseline by weekday ----
             if wd == 6:
-                # recovery — low intensity
                 rpe = random.randint(2, 4)
                 duration = random.choice([30, 45, 60])
+                stype = "recovery"
             elif wd == 5:
                 rpe = max(1, min(10, 6 + random.randint(-2, 3)))
                 duration = 90
+                stype = "match"
+            elif wd == 1:
+                rpe = max(1, min(10, 5 + random.randint(-2, 3)))
+                duration = random.choice([60, 75, 90])
+                stype = "gym"
             else:
                 rpe = max(1, min(10, 5 + random.randint(-2, 3)))
                 duration = random.choice([60, 75, 90])
-            # spike injection on day 7 to demo high risk
-            if i in (5, 6, 7) and random.random() < 0.4 and wd != 6:
-                rpe = min(10, rpe + 2)
-                duration += 20
+                stype = "training"
             sleep = random.randint(2, 5)
             wellness = random.randint(4, 9)
-            # session type mapping by weekday: Sat=match, Tue=gym, Sun=recovery, others=training
-            if wd == 5:
-                stype = "match"
-            elif wd == 1:
-                stype = "gym"
-            elif wd == 6:
-                stype = "recovery"
-            else:
-                stype = "training"
+            # ---- HIGH RISK INJECTION (last 7 days only - acute spike) ----
+            # Sharp increase in ACUTE load (last 7 days) while CHRONIC (28d) stays normal.
+            # Also low variance for monotony, poor sleep/wellness.
+            if is_high_risk and i <= 7 and wd != 6:
+                # Very high & uniform → ACWR >>1.5, monotony >>2.0, strain >>6000
+                rpe = random.choice([9, 9, 10, 10])
+                duration = random.choice([100, 110, 115, 120])
+                sleep = random.randint(1, 2)
+                wellness = random.randint(2, 4)
+            # ---- Mild spike injection (other athletes, last week) ----
+            elif not is_high_risk and i in (5, 6, 7) and random.random() < 0.4 and wd != 6:
+                rpe = min(10, rpe + 2)
+                duration += 20
             sessions_to_insert.append({
                 "id": str(uuid.uuid4()),
                 "athlete_id": aid,
@@ -2011,11 +2023,30 @@ async def admin_list_users(admin=Depends(require_admin)):
             team_ids = [t["id"] async for t in db.teams.find({"user_id": u["id"]}, {"id": 1})]
             athletes_n = await db.athletes.count_documents({"team_id": {"$in": team_ids}})
             sessions_n = await db.sessions.count_documents({"team_id": {"$in": team_ids}})
+        # ensure max_teams default
+        if "max_teams" not in u and u.get("role") == "coach":
+            u["max_teams"] = MAX_TEAMS_PER_USER
         out.append({
             **u,
             "stats": {"teams": teams_n, "athletes": athletes_n, "sessions": sessions_n},
         })
     return out
+
+
+class MaxTeamsIn(BaseModel):
+    max_teams: int = Field(ge=1, le=MAX_TEAMS_PER_USER)
+
+
+@api.post("/admin/users/{user_id}/max-teams")
+async def admin_set_max_teams(user_id: str, data: MaxTeamsIn, admin=Depends(require_admin)):
+    """Admin defines how many teams a coach may create (1..5)."""
+    target = await db.users.find_one({"id": user_id})
+    if not target:
+        raise HTTPException(404, "Utilizador não encontrado")
+    if target.get("role") != "coach":
+        raise HTTPException(400, "Apenas aplicável a contas de treinador")
+    await db.users.update_one({"id": user_id}, {"$set": {"max_teams": data.max_teams}})
+    return {"ok": True, "id": user_id, "max_teams": data.max_teams}
 
 
 @api.post("/admin/users/{user_id}/validate")
@@ -2244,7 +2275,11 @@ class PlayerSessionIn(BaseModel):
 
 @api.post("/player/sessions")
 async def player_create_session(data: PlayerSessionIn, user=Depends(require_player)):
-    """Player registers their OWN session (no athlete_id override possible)."""
+    """Player registers their OWN session (no athlete_id override possible).
+
+    Players CANNOT delete their own sessions — only the coach (via /api/sessions/{id})
+    can edit/delete them. This preserves the integrity of the load data.
+    """
     if not user.get("athlete_id") or not user.get("team_id"):
         raise HTTPException(400, "Conta sem atleta associado")
     if data.session_type not in {"training", "match", "gym", "recovery"}:
@@ -2269,16 +2304,6 @@ async def player_create_session(data: PlayerSessionIn, user=Depends(require_play
     await db.sessions.insert_one(doc)
     # Return WITHOUT load
     return {k: v for k, v in doc.items() if k not in {"load", "_id"}}
-
-
-@api.delete("/player/sessions/{session_id}")
-async def player_delete_session(session_id: str, user=Depends(require_player)):
-    """Allow player to delete a session they own. Coach-created sessions also OK if athlete_id matches."""
-    sess = await db.sessions.find_one({"id": session_id, "athlete_id": user.get("athlete_id")})
-    if not sess:
-        raise HTTPException(404, "Sessão não encontrada")
-    await db.sessions.delete_one({"id": session_id})
-    return {"ok": True}
 
 
 # ---------------------- Startup ----------------------

@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
-import { Trash2 } from "lucide-react";
 import { SESSION_TYPES, SessionTypeBadge } from "@/components/Bits";
 
 export default function PlayerSessions() {
@@ -18,22 +17,13 @@ export default function PlayerSessions() {
   }
   useEffect(() => { load(); }, []);
 
-  async function remove(s) {
-    if (!window.confirm(`Eliminar sessão de ${s.date}?`)) return;
-    try {
-      await http.delete(`/player/sessions/${s.id}`);
-      toast.success("Sessão eliminada");
-      load();
-    } catch (err) { toast.error(formatApiError(err)); }
-  }
-
   return (
     <div className="space-y-6" data-testid="player-sessions">
       <div>
         <div className="text-xs text-[#CCFF00] tracking-[0.3em] uppercase mb-2">Histórico</div>
         <h1 className="font-head text-3xl sm:text-4xl font-black leading-none">MINHAS SESSÕES</h1>
         <p className="text-[#A3A3A3] text-xs sm:text-sm mt-2">
-          {sessions.length} sessões registadas
+          {sessions.length} sessões registadas. Para alterar ou eliminar, contacta a equipa técnica.
         </p>
       </div>
 
@@ -71,14 +61,6 @@ export default function PlayerSessions() {
                     <div className="metric-num text-sm">{s.wellness ?? "—"}/10</div>
                   </div>
                 </div>
-                <button
-                  onClick={() => remove(s)}
-                  data-testid={`delete-${s.id}`}
-                  className="shrink-0 text-[#525252] hover:text-[#FF3B30] p-1"
-                  title="Eliminar"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
               </div>
             );
           })}

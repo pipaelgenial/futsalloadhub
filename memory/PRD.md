@@ -131,7 +131,14 @@ e estilo dashboard.
   - PlayerLogSession (RPE, duração, tipo, sono, bem-estar, notas)
   - PlayerSessions (histórico NEWEST-FIRST sem coluna de carga)
 
-## Phase 11 — Deferred
+## Phase 11 — Admin Per-Coach Team Limit + Demo Risk + Locked Player History (18 Jun 2026)
+- **Limite de equipas por coach configurável pelo admin**: novo campo `max_teams` (1..5, default 5) por utilizador. Endpoint `POST /api/admin/users/{id}/max-teams`. UI no AdminPanel mostra "1 2 3 4 5" com botão atual destacado e botões "tooLow" (abaixo do nº de equipas atuais) bloqueados.
+- **POST /api/teams** valida agora contra `user.max_teams` (com cap absoluto MAX_TEAMS_PER_USER=5).
+- **Demo seed com risco**: 3 atletas (índices 0, 2, 5) recebem injeção de carga aguda nos últimos 7 dias (RPE 9-10, duração 100-120min, sono 1-2, bem-estar 2-4) → produz ACWR HIGH, sleep_poor, wellness_low e potenciais strain_extreme alerts.
+- **Atleta NÃO apaga sessões**: removido endpoint `DELETE /api/player/sessions/{id}` e o botão de eliminar no `PlayerSessions.jsx`. Mensagem no histórico: "Para alterar ou eliminar, contacta a equipa técnica."
+- **Coach edita sessões**: já existente em `AthleteDetail.jsx` (PUT /api/sessions/{id}).
+
+## Phase 12 — Deferred
 ### P0
 - **Resumo Mensal Automático**: para cada atleta, média de carga e qualidade do sono
   por mês, com destaque de evolução (delta vs. mês anterior)

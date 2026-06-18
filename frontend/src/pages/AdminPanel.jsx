@@ -32,10 +32,10 @@ export default function AdminPanel() {
   }
   useEffect(() => { load(); }, []);
 
-  async function callAction(userId, endpoint, successMsg) {
+  async function callAction(userId, endpoint, successMsg, body) {
     setActing(userId);
     try {
-      await http.post(`/admin/users/${userId}/${endpoint}`);
+      await http.post(`/admin/users/${userId}/${endpoint}`, body || {});
       toast.success(successMsg);
       load();
     } catch (err) { toast.error(formatApiError(err)); }
@@ -146,11 +146,41 @@ export default function AdminPanel() {
                   </div>
                   <div className="text-[11px] text-[#A3A3A3] mt-1 truncate">{u.name || "—"}</div>
                   <div className="text-[10px] text-[#525252] mt-1 flex flex-wrap gap-3">
-                    <span>Equipas: <span className="metric-num text-white">{u.stats?.teams || 0}</span></span>
+                    <span>Equipas: <span className="metric-num text-white">{u.stats?.teams || 0}</span>{u.role === "coach" && <span className="text-[#525252]">/{u.max_teams ?? 5}</span>}</span>
                     <span>Atletas: <span className="metric-num text-white">{u.stats?.athletes || 0}</span></span>
                     <span>Sessões: <span className="metric-num text-white">{u.stats?.sessions || 0}</span></span>
                     {u.last_login_at && <span>Último login: <span className="text-[#A3A3A3]">{new Date(u.last_login_at).toLocaleDateString("pt-PT")}</span></span>}
                   </div>
+                  {u.role === "coach" && (
+                    <div className="mt-2 flex items-center gap-2 flex-wrap" data-testid={`max-teams-row-${u.id}`}>
+                      <span className="text-[10px] uppercase tracking-widest text-[#525252]">Limite de equipas:</span>
+                      <div className="flex gap-1">
+                        {[1, 2, 3, 4, 5].map((n) => {
+                          const cur = u.max_teams ?? 5;
+                          const isActive = cur === n;
+                          const tooLow = n < (u.stats?.teams || 0);
+                          return (
+                            <button
+                              key={n}
+                              onClick={() => callAction(u.id, `max-teams`, `Limite definido para ${n}`, { max_teams: n })}
+                              disabled={acting === u.id || isActive || tooLow}
+                              data-testid={`max-teams-${u.id}-${n}`}
+                              className="text-[10px] font-head px-2 py-1 border transition-all"
+                              style={{
+                                borderColor: isActive ? "#CCFF00" : tooLow ? "rgba(255,59,48,0.25)" : "rgba(255,255,255,0.10)",
+                                color: isActive ? "#CCFF00" : tooLow ? "#FF3B30" : "#A3A3A3",
+                                background: isActive ? "rgba(204,255,0,0.10)" : "transparent",
+                                cursor: tooLow ? "not-allowed" : "pointer",
+                              }}
+                              title={tooLow ? "Coach já tem mais equipas do que este limite" : ""}
+                            >
+                              {n}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {!isAdmin && u.status === "pending" && (
