@@ -2,6 +2,7 @@
 team weekly overview, team summary avg_wellness, wellness-based risk."""
 import os
 from datetime import date, timedelta
+
 import pytest
 import requests
 

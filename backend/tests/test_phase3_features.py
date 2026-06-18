@@ -1,9 +1,10 @@
 """Phase 3 backend API tests: refined risk zones, reset-all, photo upload/get/delete."""
-import os
 import io
+import os
 import struct
 import zlib
 from datetime import date, timedelta
+
 import pytest
 import requests
 

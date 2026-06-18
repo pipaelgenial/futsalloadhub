@@ -3,7 +3,7 @@ import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 import { RiskBadge } from "@/components/Bits";
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceArea, CartesianGrid, Legend,
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceArea, CartesianGrid,
 } from "recharts";
 
 const A1_COLOR = "#CCFF00";

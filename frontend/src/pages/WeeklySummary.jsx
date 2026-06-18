@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { http, formatApiError } from "@/lib/api";
+import { http, formatApiError, downloadFile } from "@/lib/api";
 import { toast } from "sonner";
-import { ArrowUp, ArrowDown, Minus } from "lucide-react";
+import { ArrowUp, ArrowDown, Minus, FileDown } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
   LineChart, Line,
@@ -90,6 +90,22 @@ export default function WeeklySummary() {
               ))}
             </optgroup>
           </select>
+          {selected !== TEAM_SELECTION && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await downloadFile(`/export/weekly/${selected}.pdf?weeks=${weeks}`, "resumo_semanal.pdf");
+                  toast.success("PDF gerado");
+                } catch (err) { toast.error(formatApiError(err)); }
+              }}
+              data-testid="export-weekly-pdf"
+              className="flex items-center gap-1.5 px-3 py-2 border border-[#CCFF00]/40 text-[#CCFF00] hover:bg-[#CCFF00]/10 transition-all text-xs font-head uppercase tracking-widest"
+              title="Exportar resumo do atleta selecionado em PDF"
+            >
+              <FileDown className="w-3.5 h-3.5" /> PDF
+            </button>
+          )}
         </div>
       </div>
 

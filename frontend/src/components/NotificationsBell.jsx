@@ -93,7 +93,7 @@ export default function NotificationsBell({ testid = "notifications-bell" }) {
       });
       localStorage.setItem(DASHBOARD_TOAST_KEY, String(Date.now()));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [alerts.length, onDashboardMount]);
 
   const active = alerts.filter((a) => !resolved.has(a.id));

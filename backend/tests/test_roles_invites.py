@@ -4,10 +4,10 @@ athlete invite flow, and player-only views.
 Covers items 1-12 of the review request.
 """
 import os
-import time
 import uuid
-import requests
+
 import pytest
+import requests
 from dotenv import load_dotenv
 
 load_dotenv("/app/frontend/.env")

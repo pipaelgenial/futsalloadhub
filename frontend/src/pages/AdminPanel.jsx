@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
-import { Check, X, RotateCcw, Trash2, ShieldCheck, ShieldAlert, Users, Search } from "lucide-react";
+import { Check, RotateCcw, Trash2, ShieldCheck, ShieldAlert, Users, Search } from "lucide-react";
 
 const STATUS_META = {
   pending: { label: "Pendente", color: "#FF9500", bg: "rgba(255,149,0,0.10)" },

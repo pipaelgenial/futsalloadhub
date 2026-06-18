@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { http, formatApiError } from "@/lib/api";
+import { http, formatApiError, downloadFile } from "@/lib/api";
 import { toast } from "sonner";
-import { MetricCard } from "@/components/Bits";
-import { ArrowUp, ArrowDown, Minus } from "lucide-react";
+import { ArrowUp, ArrowDown, Minus, FileDown } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
   LineChart, Line,
@@ -72,20 +71,38 @@ export default function MonthlySummary() {
           <h1 className="font-head text-3xl sm:text-4xl md:text-5xl font-black leading-none">RESUMO MENSAL</h1>
           <p className="text-[#A3A3A3] text-sm mt-2">Média de carga e qualidade do sono · Evolução vs. mês anterior</p>
         </div>
-        <select
-          className="fld-input w-64"
-          value={selected}
-          onChange={(e) => setSelected(e.target.value)}
-          data-testid="monthly-athlete-select"
-        >
-          <option value={TEAM_SELECTION}>Equipa (Visão Geral)</option>
-          <optgroup label="Atletas">
-            {athletes.length === 0 && <option disabled>— Sem atletas —</option>}
-            {athletes.map((a) => (
-              <option key={a.id} value={a.id}>{a.name} {a.jersey_number ? `#${a.jersey_number}` : ""}</option>
-            ))}
-          </optgroup>
-        </select>
+        <div className="flex gap-2 items-center">
+          <select
+            className="fld-input w-64"
+            value={selected}
+            onChange={(e) => setSelected(e.target.value)}
+            data-testid="monthly-athlete-select"
+          >
+            <option value={TEAM_SELECTION}>Equipa (Visão Geral)</option>
+            <optgroup label="Atletas">
+              {athletes.length === 0 && <option disabled>— Sem atletas —</option>}
+              {athletes.map((a) => (
+                <option key={a.id} value={a.id}>{a.name} {a.jersey_number ? `#${a.jersey_number}` : ""}</option>
+              ))}
+            </optgroup>
+          </select>
+          {selected !== TEAM_SELECTION && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await downloadFile(`/export/monthly/${selected}.pdf?months=6`, "resumo_mensal.pdf");
+                  toast.success("PDF gerado");
+                } catch (err) { toast.error(formatApiError(err)); }
+              }}
+              data-testid="export-monthly-pdf"
+              className="flex items-center gap-1.5 px-3 py-2 border border-[#CCFF00]/40 text-[#CCFF00] hover:bg-[#CCFF00]/10 transition-all text-xs font-head uppercase tracking-widest"
+              title="Exportar resumo do atleta selecionado em PDF"
+            >
+              <FileDown className="w-3.5 h-3.5" /> PDF
+            </button>
+          )}
+        </div>
       </div>
 
       {data?.isTeam && (

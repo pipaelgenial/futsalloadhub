@@ -1,6 +1,7 @@
 """Futsal Load Hub backend API tests."""
 import os
 import uuid
+
 import pytest
 import requests
 

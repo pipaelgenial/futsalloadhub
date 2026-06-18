@@ -219,7 +219,7 @@ export default function CalendarPage() {
     } catch (err) { toast.error(formatApiError(err)); }
     finally { setLoading(false); }
   }
-  useEffect(() => { load(); }, [query.start.getTime(), query.days]); // eslint-disable-line
+  useEffect(() => { load(); }, [query.start.getTime(), query.days]);  
 
   function shiftMonth(n) {
     let m = monthIdx + n;

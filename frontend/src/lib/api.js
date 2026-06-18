@@ -23,3 +23,24 @@ export function formatApiError(err) {
     return detail.map((e) => (e?.msg ? e.msg : JSON.stringify(e))).join(" ");
   return String(detail);
 }
+
+/**
+ * Download a file from an authenticated endpoint and trigger a browser save.
+ * @param {string} path - API path (e.g. "/export/sessions.csv?start=...")
+ * @param {string} fallbackName - fallback filename when server omits Content-Disposition
+ */
+export async function downloadFile(path, fallbackName = "download") {
+  const res = await http.get(path, { responseType: "blob" });
+  // Try to extract filename from Content-Disposition
+  const cd = res.headers["content-disposition"] || "";
+  const match = /filename="?([^"]+)"?/i.exec(cd);
+  const name = match ? match[1] : fallbackName;
+  const url = window.URL.createObjectURL(res.data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}

@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
-import { http, formatApiError } from "@/lib/api";
+import { http, formatApiError, downloadFile } from "@/lib/api";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
-import { RiskBadge, MetricCard, riskMeta, MonotonyAlert } from "@/components/Bits";
+import { RiskBadge, MonotonyAlert } from "@/components/Bits";
 import PlayerAvatar from "@/components/PlayerAvatar";
-import { AlertTriangle, Database, ArrowRight, Trash2 } from "lucide-react";
+import { AlertTriangle, Database, ArrowRight, Trash2, FileDown } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceArea, CartesianGrid,
-  BarChart, Bar, Cell,
 } from "recharts";
 
 const TEAM_SELECTION = "__team__";
@@ -109,6 +108,24 @@ export default function Dashboard() {
           )}
         </div>
         <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={async () => {
+              try {
+                const end = new Date();
+                const start = new Date(end);
+                start.setDate(start.getDate() - 30);
+                const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                await downloadFile(`/export/sessions.csv?start=${fmt(start)}&end=${fmt(end)}`, "sessoes.csv");
+                toast.success("CSV gerado (últimos 30 dias)");
+              } catch (err) { toast.error(formatApiError(err)); }
+            }}
+            disabled={!data?.team}
+            className="fld-btn-ghost flex items-center gap-2 disabled:opacity-30"
+            data-testid="export-sessions-csv"
+            title="Exporta sessões dos últimos 30 dias para CSV"
+          >
+            <FileDown className="w-4 h-4" /> CSV 30D
+          </button>
           <button onClick={seedDemo} disabled={seeding} className="fld-btn-ghost flex items-center gap-2" data-testid="seed-demo-btn">
             <Database className="w-4 h-4" /> {seeding ? "A GERAR..." : "DADOS DEMO"}
           </button>

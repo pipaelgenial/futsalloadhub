@@ -1,8 +1,9 @@
 """Backend tests for the new /api/alerts endpoint (notifications feature)."""
 import os
+from datetime import date
+
 import pytest
 import requests
-from datetime import date
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://futsal-load-hub.preview.emergentagent.com").rstrip("/")
 EMAIL = "treinador@futsal.pt"

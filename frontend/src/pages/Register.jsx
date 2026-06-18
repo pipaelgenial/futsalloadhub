@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { formatApiError } from "@/lib/api";
 import { toast } from "sonner";
@@ -7,7 +7,6 @@ import { Activity } from "lucide-react";
 
 export default function Register() {
   const { register } = useAuth();
-  const navigate = useNavigate();
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [loading, setLoading] = useState(false);
 

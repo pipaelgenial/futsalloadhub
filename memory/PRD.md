@@ -166,7 +166,25 @@ e estilo dashboard.
 - **localStorage tokens**: já usamos `httpOnly cookies` (`set_auth_cookie` com httponly=True, secure=True, samesite=none) — o token em localStorage é fallback para o header `Authorization: Bearer` em CORS cross-origin.
 - **Type hints, ternários, complex AdminPanel/NotificationsBell**: cosméticos sem impacto funcional. Marcados como future polish.
 
-## Phase 14 — Deferred
+## Phase 14 — Exports CSV/PDF + CI/Linting (18 Jun 2026)
+- **Backend exports** (3 endpoints novos):
+  - `GET /api/export/sessions.csv?start=&end=` — sessões da equipa em CSV com BOM UTF-8 (Excel-friendly), colunas: data, atleta, dorsal, posição, tipo, RPE, duração, carga, sono, bem-estar, notas.
+  - `GET /api/export/weekly/{athlete_id}.pdf?weeks=N` — resumo semanal por atleta com cabeçalho FUTSAL LOAD HUB, evolução vs semana anterior, tabela estilizada (reportlab).
+  - `GET /api/export/monthly/{athlete_id}.pdf?months=N` — idem mensal.
+- **Frontend buttons**:
+  - Dashboard: `CSV 30D` (download direto últimos 30 dias).
+  - Resumo Semanal/Mensal: botão `PDF` ativo apenas quando um atleta está selecionado.
+  - Util `downloadFile` em `lib/api.js` que lê Content-Disposition e cria download via blob URL.
+- **CI / GitHub Actions** (`.github/workflows/ci.yml`):
+  - Job `backend-lint` corre `ruff check backend/` em Python 3.11.
+  - Job `frontend-lint` corre `yarn lint --max-warnings=0` em Node 20.
+  - Triggers: push/PR para `main`.
+- **ESLint flat config** (`frontend/eslint.config.mjs`) — config mínima para React 19 com `jsx-uses-vars`, `no-unused-vars`, `no-empty` (com allowEmptyCatch). `exhaustive-deps` desligado (closures intencionais).
+- **Ruff config** (`backend/pyproject.toml`) — selecionado E/F/W/I/B, ignorado E402/E701/E501 (estilo) e B008 (FastAPI Depends).
+- **Cleanup**: removidos 8 imports não usados (Dashboard, MonthlySummary, AdminPanel, Compare, Register), corrigidos 2 `raise X from None` em get_current_user.
+- **Conta de coach de teste** criada: `treinador@futsalloadhub.com` / `treinador` (status active, sem equipas).
+
+## Phase 15 — Deferred
 ### P0
 - **Resumo Mensal Automático**: para cada atleta, média de carga e qualidade do sono
   por mês, com destaque de evolução (delta vs. mês anterior)

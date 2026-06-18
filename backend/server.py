@@ -1,27 +1,29 @@
-from dotenv import load_dotenv
 from pathlib import Path
+
+from dotenv import load_dotenv
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-import os
+import asyncio
 import logging
-import uuid
-import bcrypt
-import jwt
 import math
+import os
 import random
 import secrets
-import asyncio
-import resend
-from typing import List, Optional, Annotated
-from datetime import datetime, timezone, timedelta, date
+import uuid
 from collections import defaultdict
+from datetime import date, datetime, timedelta, timezone
+from typing import List, Optional
 
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File
+import bcrypt
+import jwt
+import resend
+from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
-from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, Field
+from starlette.middleware.cors import CORSMiddleware
 
 # MongoDB
 mongo_url = os.environ['MONGO_URL']
@@ -98,9 +100,9 @@ async def get_current_user(request: Request) -> dict:
             raise HTTPException(403, "Acesso restrito à vista de administrador")
         return user
     except jwt.ExpiredSignatureError:
-        raise HTTPException(401, "Sessão expirada")
+        raise HTTPException(401, "Sessão expirada") from None
     except jwt.InvalidTokenError:
-        raise HTTPException(401, "Token inválido")
+        raise HTTPException(401, "Token inválido") from None
 
 
 def require_role(*roles: str):
@@ -2423,6 +2425,201 @@ async def player_create_session(data: PlayerSessionIn, user=Depends(require_play
     await db.sessions.insert_one(doc)
     # Return WITHOUT load
     return {k: v for k, v in doc.items() if k not in {"load", "_id"}}
+
+
+# ============================================================
+# EXPORTS — CSV (sessions) + PDF (weekly/monthly summaries)
+# ============================================================
+import csv as _csv
+import io
+
+from fastapi.responses import StreamingResponse
+
+
+@api.get("/export/sessions.csv")
+async def export_sessions_csv(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    user=Depends(get_current_user),
+):
+    """Coach exports team sessions in a date range as CSV.
+    Filename: sessoes_{team_slug}_{start}_{end}.csv
+    Columns: data, atleta, dorsal, posição, tipo, RPE, duração (min), carga (UA), sono (1-5), bem-estar (1-10), notas
+    """
+    if user.get("role") != "coach":
+        raise HTTPException(403, "Apenas treinadores podem exportar")
+    team = await _get_team_or_404(user)
+    q = {"team_id": team["id"]}
+    if start and end:
+        q["date"] = {"$gte": start, "$lte": end}
+    sessions = await db.sessions.find(q, {"_id": 0}).sort("date", 1).to_list(20000)
+    athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).to_list(500)
+    a_map = {a["id"]: a for a in athletes}
+
+    type_label = {"training": "Treino", "match": "Jogo", "gym": "Ginásio", "recovery": "Recuperação"}
+    buf = io.StringIO()
+    buf.write("\ufeff")  # BOM so Excel reads UTF-8 correctly
+    writer = _csv.writer(buf, delimiter=";")
+    writer.writerow(["Data", "Atleta", "Dorsal", "Posição", "Tipo", "RPE", "Duração (min)", "Carga (UA)", "Sono (1-5)", "Bem-estar (1-10)", "Notas"])
+    for s in sessions:
+        a = a_map.get(s["athlete_id"], {})
+        writer.writerow([
+            s.get("date", ""),
+            a.get("name", "—"),
+            a.get("jersey_number", "") or "",
+            a.get("position", "") or "",
+            type_label.get(s.get("session_type", "training"), s.get("session_type", "")),
+            s.get("rpe", ""),
+            s.get("duration_min", ""),
+            s.get("load", ""),
+            s.get("sleep_quality", ""),
+            s.get("wellness", ""),
+            (s.get("notes") or "").replace("\n", " "),
+        ])
+    buf.seek(0)
+    safe_team = "".join(c if c.isalnum() else "_" for c in team["name"])[:40]
+    fname = f"sessoes_{safe_team}_{start or 'inicio'}_{end or 'fim'}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+def _build_summary_pdf(*, title: str, athlete_name: str, team_name: str, period_label: str, rows: list, headers: list, evolution: str, evolution_pct: float) -> bytes:
+    """Generate a styled PDF summary using reportlab. Returns the bytes."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import cm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+    styles = getSampleStyleSheet()
+    lime = colors.HexColor("#7AAA00")
+    dark = colors.HexColor("#0F0F0F")
+    grey = colors.HexColor("#525252")
+    light = colors.HexColor("#A3A3A3")
+
+    h_style = ParagraphStyle("h", parent=styles["Title"], textColor=dark, fontSize=22, leading=26, spaceAfter=4)
+    sub_style = ParagraphStyle("sub", parent=styles["Normal"], textColor=lime, fontSize=9, spaceAfter=2, leading=12)
+    meta_style = ParagraphStyle("meta", parent=styles["Normal"], textColor=grey, fontSize=10, spaceAfter=16, leading=14)
+    body_style = ParagraphStyle("body", parent=styles["Normal"], textColor=dark, fontSize=11, spaceAfter=8, leading=15)
+
+    story = []
+    story.append(Paragraph("FUTSAL LOAD HUB · " + title.upper(), sub_style))
+    story.append(Paragraph(athlete_name, h_style))
+    story.append(Paragraph(f"{team_name} · {period_label}", meta_style))
+
+    if rows:
+        ev_color = "#7AAA00" if evolution == "subiu" else ("#C24500" if evolution == "desceu" else "#525252")
+        story.append(Paragraph(
+            f'Evolução da carga: <font color="{ev_color}"><b>{evolution.upper()}</b> ({evolution_pct:+.1f}%)</font>',
+            body_style,
+        ))
+
+    table_data = [headers] + rows if rows else [headers, ["—"] * len(headers)]
+    tbl = Table(table_data, repeatRows=1, hAlign="LEFT")
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), lime),
+        ("TEXTCOLOR", (0, 0), (-1, 0), dark),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        ("ALIGN", (0, 0), (0, -1), "LEFT"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F5F5F5")]),
+        ("TEXTCOLOR", (0, 1), (-1, -1), dark),
+        ("GRID", (0, 0), (-1, -1), 0.5, light),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    story.append(tbl)
+    story.append(Spacer(1, 12))
+    story.append(Paragraph(
+        f'Gerado em {datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M")} UTC · futsal-load-hub',
+        ParagraphStyle("foot", parent=styles["Normal"], textColor=grey, fontSize=8, alignment=2),
+    ))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+@api.get("/export/weekly/{athlete_id}.pdf")
+async def export_weekly_pdf(athlete_id: str, weeks: int = 8, user=Depends(get_current_user)):
+    if user.get("role") != "coach":
+        raise HTTPException(403, "Apenas treinadores podem exportar")
+    data = await weekly_summary(athlete_id, weeks=weeks, user=user)
+    rows = []
+    for w in data["weeks"]:
+        delta_str = ""
+        if w.get("delta_load_pct") is not None:
+            sign = "+" if w["delta_load_pct"] > 0 else ""
+            delta_str = f"{sign}{w['delta_load_pct']:.1f}%"
+        rows.append([
+            w.get("label", w["week"]),
+            str(w.get("sessions", 0)),
+            f'{w.get("avg_load", 0):.0f}',
+            f'{w.get("avg_sleep", 0):.1f}' if w.get("avg_sleep") else "—",
+            f'{w.get("avg_wellness", 0):.1f}' if w.get("avg_wellness") else "—",
+            delta_str,
+        ])
+    team = await _get_team_or_404(user)
+    pdf_bytes = _build_summary_pdf(
+        title="Resumo Semanal",
+        athlete_name=data["athlete"]["name"],
+        team_name=team["name"],
+        period_label=f"Últimas {weeks} semanas",
+        rows=rows,
+        headers=["Semana", "Sessões", "Carga méd.", "Sono", "Bem-estar", "Δ vs sem. anterior"],
+        evolution=data.get("evolution", "indeterminado"),
+        evolution_pct=data.get("evolution_pct", 0),
+    )
+    safe_name = "".join(c if c.isalnum() else "_" for c in data["athlete"]["name"])[:40]
+    fname = f"semanal_{safe_name}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@api.get("/export/monthly/{athlete_id}.pdf")
+async def export_monthly_pdf(athlete_id: str, months: int = 6, user=Depends(get_current_user)):
+    if user.get("role") != "coach":
+        raise HTTPException(403, "Apenas treinadores podem exportar")
+    data = await monthly_summary(athlete_id, months=months, user=user)
+    rows = []
+    for m in data["months"]:
+        delta_str = ""
+        if m.get("delta_load_pct") is not None:
+            sign = "+" if m["delta_load_pct"] > 0 else ""
+            delta_str = f"{sign}{m['delta_load_pct']:.1f}%"
+        rows.append([
+            m.get("month", ""),
+            str(m.get("sessions", 0)),
+            f'{m.get("avg_load", 0):.0f}',
+            f'{m.get("avg_sleep", 0):.1f}' if m.get("avg_sleep") else "—",
+            delta_str,
+        ])
+    team = await _get_team_or_404(user)
+    pdf_bytes = _build_summary_pdf(
+        title="Resumo Mensal",
+        athlete_name=data["athlete"]["name"],
+        team_name=team["name"],
+        period_label=f"Últimos {months} meses",
+        rows=rows,
+        headers=["Mês", "Sessões", "Carga méd.", "Sono", "Δ vs mês anterior"],
+        evolution=data.get("evolution", "indeterminado"),
+        evolution_pct=data.get("evolution_pct", 0),
+    )
+    safe_name = "".join(c if c.isalnum() else "_" for c in data["athlete"]["name"])[:40]
+    fname = f"mensal_{safe_name}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 # ---------------------- Startup ----------------------

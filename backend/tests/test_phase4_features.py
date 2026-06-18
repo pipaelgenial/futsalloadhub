@@ -3,6 +3,7 @@ overview, calendar, planned-sessions CRUD, seed/demo planned count, reset-all pl
 """
 import os
 from datetime import date, timedelta
+
 import pytest
 import requests
 

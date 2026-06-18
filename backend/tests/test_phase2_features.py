@@ -1,6 +1,7 @@
 """Phase 2 backend API tests: monthly summary, compare athletes, injuries."""
 import os
 from datetime import date
+
 import pytest
 import requests
 
