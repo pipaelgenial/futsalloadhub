@@ -138,7 +138,20 @@ e estilo dashboard.
 - **Atleta NÃO apaga sessões**: removido endpoint `DELETE /api/player/sessions/{id}` e o botão de eliminar no `PlayerSessions.jsx`. Mensagem no histórico: "Para alterar ou eliminar, contacta a equipa técnica."
 - **Coach edita sessões**: já existente em `AthleteDetail.jsx` (PUT /api/sessions/{id}).
 
-## Phase 12 — Deferred
+## Phase 12 — Password Recovery via Email (Resend) (18 Jun 2026)
+- **Integração Resend** (sandbox `onboarding@resend.dev`): novo SDK `resend>=2.0.0` em requirements.txt. RESEND_API_KEY + SENDER_EMAIL em backend/.env.
+- **Endpoints públicos**:
+  - `POST /api/auth/forgot` — gera token URL-safe (32 chars), TTL 1h, invalida tokens anteriores do user, envia email com link via Resend (assíncrono via `asyncio.to_thread`). Resposta SEMPRE 200 para evitar enumeração de emails.
+  - `GET /api/auth/reset/{token}` — valida token (404 inválido, 410 expirado).
+  - `POST /api/auth/reset/{token}` — body `{password: min 6}`, atualiza hash + apaga token (one-time use) + invalida outros tokens pendentes.
+- **Email HTML** com branding FUTSAL LOAD HUB, botão CTA lime, link copy-paste, aviso de 60min de validade.
+- **Frontend**:
+  - `/recuperar-password` (ForgotPassword.jsx): form simples + ecrã "Pedido enviado" com lembrete de SPAM.
+  - `/recuperar-password/:token` (ResetPassword.jsx): valida token, form de nova password + confirmação, ecrã "Password atualizada" + redirect login.
+  - Link "Esqueceste a password?" adicionado em Login.jsx abaixo do botão ENTRAR.
+- **Limitação sandbox**: o domínio `onboarding@resend.dev` só envia para o email registado na conta Resend; em produção é necessário verificar domínio próprio em https://resend.com/domains.
+
+## Phase 13 — Deferred
 ### P0
 - **Resumo Mensal Automático**: para cada atleta, média de carga e qualidade do sono
   por mês, com destaque de evolução (delta vs. mês anterior)

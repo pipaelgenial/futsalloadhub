@@ -10,6 +10,9 @@ import bcrypt
 import jwt
 import math
 import random
+import secrets
+import asyncio
+import resend
 from typing import List, Optional, Annotated
 from datetime import datetime, timezone, timedelta, date
 from collections import defaultdict
@@ -279,6 +282,122 @@ async def logout(response: Response):
 @api.get("/auth/me")
 async def me(user=Depends(get_current_user)):
     return user
+
+
+# ---------------------- Password Reset (Resend) ----------------------
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
+SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "onboarding@resend.dev")
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "").rstrip("/")
+PASSWORD_RESET_TTL_MIN = 60
+
+if RESEND_API_KEY:
+    resend.api_key = RESEND_API_KEY
+
+
+def _build_reset_email_html(name: str, reset_url: str) -> str:
+    return f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#0A0A0A;font-family:Arial,sans-serif;color:#fff;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0A0A0A;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="520" cellpadding="0" cellspacing="0" style="background:#0F0F0F;border:1px solid rgba(255,255,255,0.08);padding:32px;">
+        <tr><td>
+          <div style="color:#CCFF00;font-size:11px;letter-spacing:3px;text-transform:uppercase;margin-bottom:8px;">Futsal Load Hub</div>
+          <h1 style="margin:0 0 24px;font-size:28px;color:#fff;">Recuperar a tua password</h1>
+          <p style="color:#A3A3A3;line-height:1.6;font-size:14px;">Olá{(' ' + name) if name else ''},</p>
+          <p style="color:#A3A3A3;line-height:1.6;font-size:14px;">Recebemos um pedido para redefinires a tua password. Clica no botão abaixo para escolher uma nova:</p>
+          <table cellpadding="0" cellspacing="0" style="margin:28px 0;">
+            <tr><td style="background:#CCFF00;padding:14px 28px;">
+              <a href="{reset_url}" style="color:#000;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:2px;text-transform:uppercase;">Definir Nova Password</a>
+            </td></tr>
+          </table>
+          <p style="color:#525252;font-size:12px;line-height:1.6;">Ou copia este link no navegador:<br><span style="color:#CCFF00;word-break:break-all;">{reset_url}</span></p>
+          <p style="color:#525252;font-size:12px;line-height:1.6;margin-top:24px;">Este link é válido por <strong style="color:#fff;">{PASSWORD_RESET_TTL_MIN} minutos</strong>. Se não pediste a recuperação, podes ignorar este email — a tua password atual continua válida.</p>
+          <div style="border-top:1px solid rgba(255,255,255,0.08);margin-top:32px;padding-top:16px;color:#525252;font-size:11px;">Futsal Load Hub · Monitorização de cargas</div>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+
+
+class ForgotIn(BaseModel):
+    email: EmailStr
+
+
+@api.post("/auth/forgot")
+async def forgot_password(data: ForgotIn):
+    """Public — generate a password reset token and email the link. Always returns 200 to avoid email enumeration."""
+    email = data.email.lower()
+    user = await db.users.find_one({"email": email})
+    # Silent success even when user not found (no enumeration leak)
+    if user and user.get("status") != "suspended":
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=PASSWORD_RESET_TTL_MIN)
+        # Invalidate any previous tokens for this user
+        await db.password_resets.delete_many({"user_id": user["id"]})
+        await db.password_resets.insert_one({
+            "token": token,
+            "user_id": user["id"],
+            "email": email,
+            "expires_at": expires_at.isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        base_url = FRONTEND_URL or ""
+        reset_url = f"{base_url}/recuperar-password/{token}"
+        if RESEND_API_KEY:
+            try:
+                params = {
+                    "from": SENDER_EMAIL,
+                    "to": [email],
+                    "subject": "Recuperar password — Futsal Load Hub",
+                    "html": _build_reset_email_html(user.get("name", ""), reset_url),
+                }
+                await asyncio.to_thread(resend.Emails.send, params)
+            except Exception as e:
+                logging.error(f"Resend send failed: {e}")
+                # Do not leak to caller
+        else:
+            logging.warning("RESEND_API_KEY not configured — skipping email send")
+    return {"ok": True, "message": "Se o email existir, foi enviado um link de recuperação."}
+
+
+@api.get("/auth/reset/{token}")
+async def validate_reset_token(token: str):
+    """Public — check if a reset token is valid before showing the new-password form."""
+    record = await db.password_resets.find_one({"token": token}, {"_id": 0})
+    if not record:
+        raise HTTPException(404, "Link inválido ou já utilizado")
+    expires_at = datetime.fromisoformat(record["expires_at"])
+    if expires_at < datetime.now(timezone.utc):
+        await db.password_resets.delete_one({"token": token})
+        raise HTTPException(410, "Link expirado. Pede um novo email de recuperação.")
+    return {"email": record["email"]}
+
+
+class ResetIn(BaseModel):
+    password: str = Field(min_length=6)
+
+
+@api.post("/auth/reset/{token}")
+async def reset_password(token: str, data: ResetIn):
+    """Public — consume the reset token and set a new password."""
+    record = await db.password_resets.find_one({"token": token}, {"_id": 0})
+    if not record:
+        raise HTTPException(404, "Link inválido ou já utilizado")
+    expires_at = datetime.fromisoformat(record["expires_at"])
+    if expires_at < datetime.now(timezone.utc):
+        await db.password_resets.delete_one({"token": token})
+        raise HTTPException(410, "Link expirado. Pede um novo email de recuperação.")
+    new_hash = hash_password(data.password)
+    await db.users.update_one(
+        {"id": record["user_id"]},
+        {"$set": {"password_hash": new_hash, "password_updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    # Consume the token (one-time use)
+    await db.password_resets.delete_one({"token": token})
+    # Also invalidate any other pending tokens for this user
+    await db.password_resets.delete_many({"user_id": record["user_id"]})
+    return {"ok": True}
 
 
 MAX_TEAMS_PER_USER = 5  # platform-wide hard cap; admin can lower per-coach via `max_teams` field
@@ -2317,6 +2436,8 @@ async def on_startup():
     await db.injuries.create_index([("team_id", 1), ("athlete_id", 1)])
     await db.invites.create_index("token", unique=True)
     await db.invites.create_index("athlete_id")
+    await db.password_resets.create_index("token", unique=True)
+    await db.password_resets.create_index("user_id")
 
     # --- Migration: add role/status defaults for legacy users ---
     await db.users.update_many(

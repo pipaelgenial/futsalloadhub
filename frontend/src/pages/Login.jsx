@@ -91,6 +91,12 @@ export default function Login() {
             {loading ? "A ENTRAR..." : "ENTRAR"}
           </button>
 
+          <div className="mt-4 text-right text-xs">
+            <Link to="/recuperar-password" className="text-[#A3A3A3] hover:text-[#CCFF00]" data-testid="goto-forgot">
+              Esqueceste a password?
+            </Link>
+          </div>
+
           <div className="mt-6 text-sm text-[#A3A3A3]">
             Não tem conta?{" "}
             <Link to="/register" className="text-[#CCFF00] hover:underline" data-testid="goto-register">

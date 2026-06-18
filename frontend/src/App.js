@@ -20,6 +20,8 @@ import PlayerHome from "@/pages/PlayerHome";
 import PlayerLogSession from "@/pages/PlayerLogSession";
 import PlayerSessions from "@/pages/PlayerSessions";
 import InviteAccept from "@/pages/InviteAccept";
+import ForgotPassword from "@/pages/ForgotPassword";
+import ResetPassword from "@/pages/ResetPassword";
 import "@/index.css";
 
 function Loading() {
@@ -76,6 +78,8 @@ export default function App() {
           <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
           <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
           <Route path="/convite/:token" element={<InviteAccept />} />
+          <Route path="/recuperar-password" element={<ForgotPassword />} />
+          <Route path="/recuperar-password/:token" element={<ResetPassword />} />
 
           {/* Admin */}
           <Route path="/admin" element={<ProtectedAdmin><AdminPanel /></ProtectedAdmin>} />
