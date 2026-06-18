@@ -118,8 +118,8 @@ function MonthGrid({ year, monthIdx, daysData, selectedDate, onSelect, threshold
         ))}
       </div>
       <div className="space-y-1.5">
-        {rows.map((row, ri) => (
-          <div key={ri} className="grid grid-cols-7 gap-1.5">
+        {rows.map((row) => (
+          <div key={row[0].iso} className="grid grid-cols-7 gap-1.5">
             {row.map((c) => {
               const d = c.data;
               const cs = cellStyle(d, thresholds);

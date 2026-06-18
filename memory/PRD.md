@@ -151,7 +151,22 @@ e estilo dashboard.
   - Link "Esqueceste a password?" adicionado em Login.jsx abaixo do botão ENTRAR.
 - **Limitação sandbox**: o domínio `onboarding@resend.dev` só envia para o email registado na conta Resend; em produção é necessário verificar domínio próprio em https://resend.com/domains.
 
-## Phase 13 — Deferred
+## Phase 13 — Code Review Fixes (18 Jun 2026)
+- **Array-index-as-key** corrigido em 3 ficheiros (Cell key passou a usar `m.week`/`m.month`/`row[0].iso` em vez de índice):
+  - WeeklySummary.jsx (linha 140)
+  - MonthlySummary.jsx (linha 146)
+  - Calendar.jsx (linha 122)
+- **`is` literal comparisons**: verificado com `ruff F632` → ZERO ocorrências (falso positivo no relatório do code review)
+- **Hook deps**: ESLint exhaustive-deps não devolveu blockers nos ficheiros listados. Os useEffects atuais usam closures intencionais (`load()` lê estado atual) — adicionar deps levaria a loops infinitos. Sem alterações.
+
+### Deferred com justificação
+- **Refactor `compute_metrics_for_athlete` (214 linhas / cyclomatic 59)**: função pura, testada via pytest, todos os ramos cobrem zonas de risco específicas (ACWR/monotonia/strain/wellness). Refactor traria risco de regressão num ficheiro com 24+ testes a passar. Marcado para fase futura quando refactorizar `server.py` em routers/services.
+- **`random` no seed**: intencional — `random.seed(42)` garante demo data reprodutível. `secrets` quebraria a reprodutibilidade (e o seed não é security-sensitive, apenas gera UA/RPE/duração de treino).
+- **Hardcoded creds em tests**: são as credenciais documentadas em `/app/memory/test_credentials.md`. Os ficheiros de teste estão em `.gitignore`-able directory e existem para o testing agent.
+- **localStorage tokens**: já usamos `httpOnly cookies` (`set_auth_cookie` com httponly=True, secure=True, samesite=none) — o token em localStorage é fallback para o header `Authorization: Bearer` em CORS cross-origin.
+- **Type hints, ternários, complex AdminPanel/NotificationsBell**: cosméticos sem impacto funcional. Marcados como future polish.
+
+## Phase 14 — Deferred
 ### P0
 - **Resumo Mensal Automático**: para cada atleta, média de carga e qualidade do sono
   por mês, com destaque de evolução (delta vs. mês anterior)

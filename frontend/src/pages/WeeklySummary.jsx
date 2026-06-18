@@ -136,8 +136,8 @@ export default function WeeklySummary() {
                   <YAxis tick={{ fill: "#525252", fontSize: 11 }} />
                   <Tooltip contentStyle={{ background: "#141414", border: "1px solid rgba(255,255,255,0.15)" }} labelStyle={{ color: "#CCFF00" }} />
                   <Bar dataKey="avg_load">
-                    {chartData.map((m, i) => (
-                      <Cell key={i} fill={m.avg_load > 0 ? "#CCFF00" : "#262626"} />
+                    {chartData.map((m) => (
+                      <Cell key={m.week || m.label} fill={m.avg_load > 0 ? "#CCFF00" : "#262626"} />
                     ))}
                   </Bar>
                 </BarChart>
