@@ -71,6 +71,7 @@ export const SESSION_TYPES = {
   match: { label: "Jogo", short: "J", color: "#FF3B30", emoji: "" },
   gym: { label: "Ginásio", short: "G", color: "#FFEA00", emoji: "" },
   recovery: { label: "Recuperação", short: "R", color: "#00B0FF", emoji: "" },
+  rest: { label: "Folga", short: "F", color: "#737373", emoji: "" },
 };
 
 export const SESSION_TYPE_ORDER = ["training", "match", "gym", "recovery"];

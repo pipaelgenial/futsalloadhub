@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
-import { Copy } from "lucide-react";
+import { Copy, Coffee } from "lucide-react";
 import { SESSION_TYPES, SESSION_TYPE_ORDER } from "@/components/Bits";
 
 const todayISO = () => {
@@ -77,6 +77,7 @@ export default function LogSession() {
   });
   const [saving, setSaving] = useState(false);
   const [copying, setCopying] = useState(false);
+  const [restSaving, setRestSaving] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -111,6 +112,28 @@ export default function LogSession() {
       toast.success(`Copiado da última sessão de ${athlete?.name || "atleta"} (${last.date})`);
     } catch (err) { toast.error(formatApiError(err)); }
     finally { setCopying(false); }
+  }
+
+  async function markRestDay() {
+    if (!form.athlete_id) { toast.error("Selecione um atleta"); return; }
+    const athlete = athletes.find((a) => a.id === form.athlete_id);
+    const ok = window.confirm(
+      `Marcar ${athlete?.name || "este atleta"} como FOLGA no dia ${form.date}?\n\nO dia conta como 0 UA no cálculo da carga crónica (28 dias).`,
+    );
+    if (!ok) return;
+    setRestSaving(true);
+    try {
+      await http.post("/sessions/rest", {
+        athlete_id: form.athlete_id,
+        date: form.date,
+        sleep_quality: Number(form.sleep_quality) || null,
+        wellness: Number(form.wellness) || null,
+        notes: form.notes || null,
+      });
+      toast.success(`Folga registada — ${athlete?.name || "atleta"} (${form.date})`);
+      setForm((f) => ({ ...f, notes: "" }));
+    } catch (err) { toast.error(formatApiError(err)); }
+    finally { setRestSaving(false); }
   }
 
   async function onSubmit(e) {
@@ -167,15 +190,27 @@ export default function LogSession() {
             <div className="text-[10px] uppercase tracking-widest text-[#525252]">
               Preencher rapidamente com a última sessão do atleta
             </div>
-            <button
-              type="button"
-              onClick={copyLastSession}
-              disabled={copying || !form.athlete_id}
-              data-testid="copy-last-session"
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-[#CCFF00]/40 text-[#CCFF00] hover:bg-[#CCFF00]/10 font-head text-[11px] uppercase tracking-widest transition-all disabled:opacity-40"
-            >
-              <Copy className="w-3.5 h-3.5" /> {copying ? "A copiar..." : "Copiar Último Treino"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={markRestDay}
+                disabled={restSaving || !form.athlete_id}
+                data-testid="mark-rest-day"
+                title="Marca o dia selecionado como folga (0 UA)"
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-[#737373] text-[#A3A3A3] hover:bg-white/5 hover:text-white font-head text-[11px] uppercase tracking-widest transition-all disabled:opacity-40"
+              >
+                <Coffee className="w-3.5 h-3.5" /> {restSaving ? "A guardar..." : "Marcar Folga"}
+              </button>
+              <button
+                type="button"
+                onClick={copyLastSession}
+                disabled={copying || !form.athlete_id}
+                data-testid="copy-last-session"
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-[#CCFF00]/40 text-[#CCFF00] hover:bg-[#CCFF00]/10 font-head text-[11px] uppercase tracking-widest transition-all disabled:opacity-40"
+              >
+                <Copy className="w-3.5 h-3.5" /> {copying ? "A copiar..." : "Copiar Último Treino"}
+              </button>
+            </div>
           </div>
 
           <div>

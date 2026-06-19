@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
+import { Coffee } from "lucide-react";
 import { SESSION_TYPES, SESSION_TYPE_ORDER } from "@/components/Bits";
 
 function todayISO() {
@@ -21,6 +22,7 @@ export default function PlayerLogSession() {
     notes: "",
   });
   const [saving, setSaving] = useState(false);
+  const [restSaving, setRestSaving] = useState(false);
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -31,6 +33,25 @@ export default function PlayerLogSession() {
       navigate("/atleta/historico");
     } catch (err) { toast.error(formatApiError(err)); }
     finally { setSaving(false); }
+  }
+
+  async function markRestDay() {
+    const ok = window.confirm(
+      `Marcar o dia ${form.date} como FOLGA?\n\nNão treinaste — o dia conta como 0 UA.`,
+    );
+    if (!ok) return;
+    setRestSaving(true);
+    try {
+      await http.post("/player/sessions/rest", {
+        date: form.date,
+        sleep_quality: Number(form.sleep_quality) || null,
+        wellness: Number(form.wellness) || null,
+        notes: form.notes || null,
+      });
+      toast.success("Folga registada");
+      navigate("/atleta/historico");
+    } catch (err) { toast.error(formatApiError(err)); }
+    finally { setRestSaving(false); }
   }
 
   return (
@@ -113,8 +134,18 @@ export default function PlayerLogSession() {
           />
         </div>
 
-        <button type="submit" disabled={saving} className="fld-btn-primary w-full" data-testid="ps-submit">
+        <button type="submit" disabled={saving || restSaving} className="fld-btn-primary w-full" data-testid="ps-submit">
           {saving ? "A REGISTAR..." : "REGISTAR SESSÃO"}
+        </button>
+
+        <button
+          type="button"
+          onClick={markRestDay}
+          disabled={saving || restSaving}
+          data-testid="ps-mark-rest"
+          className="w-full flex items-center justify-center gap-2 py-3 border border-[#737373] text-[#A3A3A3] hover:bg-white/5 hover:text-white font-head text-xs uppercase tracking-widest transition-all disabled:opacity-40"
+        >
+          <Coffee className="w-4 h-4" /> {restSaving ? "A GUARDAR..." : "MARCAR DIA DE FOLGA"}
         </button>
       </form>
     </div>
