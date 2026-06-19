@@ -205,6 +205,12 @@ class RestDayIn(BaseModel):
     notes: Optional[str] = None
 
 
+class BulkRestDayIn(BaseModel):
+    date: str  # YYYY-MM-DD
+    athlete_ids: Optional[List[str]] = None  # None or [] = whole team
+    notes: Optional[str] = None
+
+
 class PlayerRestDayIn(BaseModel):
     date: str
     sleep_quality: Optional[int] = Field(default=None, ge=1, le=5)
@@ -825,6 +831,71 @@ async def create_rest_day(data: RestDayIn, user=Depends(get_current_user)):
     await db.sessions.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+@api.post("/sessions/rest/bulk")
+async def create_rest_day_bulk(data: BulkRestDayIn, user=Depends(get_current_user)):
+    """Coach marks REST day for the whole team (or a subset).
+
+    Skips athletes that already have any session registered for that date.
+    Returns a summary with created/skipped athlete ids and names.
+    """
+    team = await _get_team_or_404(user)
+    # Resolve target athlete list
+    if data.athlete_ids:
+        target = await db.athletes.find(
+            {"id": {"$in": data.athlete_ids}, "team_id": team["id"]},
+            {"_id": 0, "id": 1, "name": 1},
+        ).to_list(None)
+    else:
+        target = await db.athletes.find(
+            {"team_id": team["id"]},
+            {"_id": 0, "id": 1, "name": 1},
+        ).to_list(None)
+    if not target:
+        raise HTTPException(404, "Sem atletas para marcar folga")
+
+    target_ids = [a["id"] for a in target]
+    # Find which already have a session that day
+    existing_cursor = db.sessions.find(
+        {"athlete_id": {"$in": target_ids}, "date": data.date},
+        {"_id": 0, "athlete_id": 1},
+    )
+    existing_ids = {s["athlete_id"] async for s in existing_cursor}
+
+    created = []
+    skipped = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+    docs_to_insert = []
+    for a in target:
+        if a["id"] in existing_ids:
+            skipped.append({"id": a["id"], "name": a["name"]})
+            continue
+        doc = {
+            "id": str(uuid.uuid4()),
+            "athlete_id": a["id"],
+            "team_id": team["id"],
+            "date": data.date,
+            "rpe": 0,
+            "duration_min": 0,
+            "sleep_quality": None,
+            "wellness": None,
+            "session_type": "rest",
+            "load": 0,
+            "notes": data.notes,
+            "created_at": now_iso,
+        }
+        docs_to_insert.append(doc)
+        created.append({"id": a["id"], "name": a["name"]})
+    if docs_to_insert:
+        await db.sessions.insert_many(docs_to_insert)
+    return {
+        "date": data.date,
+        "created_count": len(created),
+        "skipped_count": len(skipped),
+        "created": created,
+        "skipped": skipped,
+    }
 
 
 @api.put("/sessions/{session_id}")

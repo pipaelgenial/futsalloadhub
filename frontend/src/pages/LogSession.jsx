@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
-import { Copy, Coffee } from "lucide-react";
+import { Copy, Coffee, Users } from "lucide-react";
 import { SESSION_TYPES, SESSION_TYPE_ORDER } from "@/components/Bits";
 
 const todayISO = () => {
@@ -78,6 +78,7 @@ export default function LogSession() {
   const [saving, setSaving] = useState(false);
   const [copying, setCopying] = useState(false);
   const [restSaving, setRestSaving] = useState(false);
+  const [bulkRestSaving, setBulkRestSaving] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -136,6 +137,31 @@ export default function LogSession() {
     finally { setRestSaving(false); }
   }
 
+  async function markTeamRestDay() {
+    const ok = window.confirm(
+      `Marcar TODA A EQUIPA como FOLGA no dia ${form.date}?\n\nAtletas com sessão já registada nesse dia serão ignorados.`,
+    );
+    if (!ok) return;
+    setBulkRestSaving(true);
+    try {
+      const { data } = await http.post("/sessions/rest/bulk", {
+        date: form.date,
+        notes: form.notes || null,
+      });
+      const created = data.created_count || 0;
+      const skipped = data.skipped_count || 0;
+      if (created === 0 && skipped > 0) {
+        toast.info(`Nenhuma folga criada — ${skipped} atleta(s) já tinham registo nesse dia`);
+      } else if (skipped > 0) {
+        toast.success(`Folga marcada para ${created} atleta(s) · ${skipped} ignorado(s) (já tinham registo)`);
+      } else {
+        toast.success(`Folga marcada para ${created} atleta(s) — equipa toda em descanso`);
+      }
+      setForm((f) => ({ ...f, notes: "" }));
+    } catch (err) { toast.error(formatApiError(err)); }
+    finally { setBulkRestSaving(false); }
+  }
+
   async function onSubmit(e) {
     e.preventDefault();
     if (!form.athlete_id) { toast.error("Selecione um atleta"); return; }
@@ -190,7 +216,17 @@ export default function LogSession() {
             <div className="text-[10px] uppercase tracking-widest text-[#525252]">
               Preencher rapidamente com a última sessão do atleta
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <button
+                type="button"
+                onClick={markTeamRestDay}
+                disabled={bulkRestSaving || athletes.length === 0}
+                data-testid="mark-team-rest"
+                title="Marca toda a equipa como folga no dia selecionado"
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-[#737373] text-[#A3A3A3] hover:bg-white/5 hover:text-white font-head text-[11px] uppercase tracking-widest transition-all disabled:opacity-40"
+              >
+                <Users className="w-3.5 h-3.5" /> {bulkRestSaving ? "A guardar..." : "Equipa em Folga"}
+              </button>
               <button
                 type="button"
                 onClick={markRestDay}
@@ -199,7 +235,7 @@ export default function LogSession() {
                 title="Marca o dia selecionado como folga (0 UA)"
                 className="flex items-center gap-1.5 px-3 py-1.5 border border-[#737373] text-[#A3A3A3] hover:bg-white/5 hover:text-white font-head text-[11px] uppercase tracking-widest transition-all disabled:opacity-40"
               >
-                <Coffee className="w-3.5 h-3.5" /> {restSaving ? "A guardar..." : "Marcar Folga"}
+                <Coffee className="w-3.5 h-3.5" /> {restSaving ? "A guardar..." : "Folga (Atleta)"}
               </button>
               <button
                 type="button"
