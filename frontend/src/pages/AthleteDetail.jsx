@@ -229,7 +229,7 @@ export default function AthleteDetail() {
               <tbody>
                 {sessions.slice(0, 30).map((s) => {
                   const isEditing = editing === s.id;
-                  const isRest = s.session_type === "rest";
+                  const isRest = s.session_type === "rest" || s.session_type === "injury";
                   const wellness = s.wellness ?? "—";
                   const sleep = s.sleep_quality ?? "—";
                   if (isEditing) {

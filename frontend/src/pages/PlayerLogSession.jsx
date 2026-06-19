@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
-import { Coffee } from "lucide-react";
+import { Coffee, HeartPulse } from "lucide-react";
 import { SESSION_TYPES, SESSION_TYPE_ORDER } from "@/components/Bits";
 
 function todayISO() {
@@ -23,6 +23,7 @@ export default function PlayerLogSession() {
   });
   const [saving, setSaving] = useState(false);
   const [restSaving, setRestSaving] = useState(false);
+  const [injurySaving, setInjurySaving] = useState(false);
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -52,6 +53,23 @@ export default function PlayerLogSession() {
       navigate("/atleta/historico");
     } catch (err) { toast.error(formatApiError(err)); }
     finally { setRestSaving(false); }
+  }
+
+  async function markInjuryDay() {
+    const ok = window.confirm(
+      `Marcar o dia ${form.date} como LESÃO?\n\nNão treinaste por estar lesionado — conta como 0 UA. Quando recuperares, volta ao registo normal.`,
+    );
+    if (!ok) return;
+    setInjurySaving(true);
+    try {
+      await http.post("/player/sessions/injury", {
+        date: form.date,
+        notes: form.notes || null,
+      });
+      toast.success("Lesão registada");
+      navigate("/atleta/historico");
+    } catch (err) { toast.error(formatApiError(err)); }
+    finally { setInjurySaving(false); }
   }
 
   return (
@@ -141,11 +159,21 @@ export default function PlayerLogSession() {
         <button
           type="button"
           onClick={markRestDay}
-          disabled={saving || restSaving}
+          disabled={saving || restSaving || injurySaving}
           data-testid="ps-mark-rest"
           className="w-full flex items-center justify-center gap-2 py-3 border border-[#737373] text-[#A3A3A3] hover:bg-white/5 hover:text-white font-head text-xs uppercase tracking-widest transition-all disabled:opacity-40"
         >
           <Coffee className="w-4 h-4" /> {restSaving ? "A GUARDAR..." : "MARCAR DIA DE FOLGA"}
+        </button>
+
+        <button
+          type="button"
+          onClick={markInjuryDay}
+          disabled={saving || restSaving || injurySaving}
+          data-testid="ps-mark-injury"
+          className="w-full flex items-center justify-center gap-2 py-3 border border-[#A855F7]/60 text-[#A855F7] hover:bg-[#A855F7]/10 font-head text-xs uppercase tracking-widest transition-all disabled:opacity-40"
+        >
+          <HeartPulse className="w-4 h-4" /> {injurySaving ? "A GUARDAR..." : "MARCAR DIA LESIONADO"}
         </button>
       </form>
     </div>

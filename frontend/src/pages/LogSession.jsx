@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
-import { Copy, Coffee, Users } from "lucide-react";
+import { Copy, Coffee, Users, HeartPulse } from "lucide-react";
 import { SESSION_TYPES, SESSION_TYPE_ORDER } from "@/components/Bits";
 
 const todayISO = () => {
@@ -79,6 +79,7 @@ export default function LogSession() {
   const [copying, setCopying] = useState(false);
   const [restSaving, setRestSaving] = useState(false);
   const [bulkRestSaving, setBulkRestSaving] = useState(false);
+  const [injurySaving, setInjurySaving] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -162,6 +163,26 @@ export default function LogSession() {
     finally { setBulkRestSaving(false); }
   }
 
+  async function markInjuryDay() {
+    if (!form.athlete_id) { toast.error("Selecione um atleta"); return; }
+    const athlete = athletes.find((a) => a.id === form.athlete_id);
+    const ok = window.confirm(
+      `Marcar ${athlete?.name || "este atleta"} como LESIONADO no dia ${form.date}?\n\nO dia conta como 0 UA (dilui a média). Após o fim da lesão, o atleta volta ao registo normal.`,
+    );
+    if (!ok) return;
+    setInjurySaving(true);
+    try {
+      await http.post("/sessions/injury", {
+        athlete_id: form.athlete_id,
+        date: form.date,
+        notes: form.notes || null,
+      });
+      toast.success(`Lesão registada — ${athlete?.name || "atleta"} (${form.date})`);
+      setForm((f) => ({ ...f, notes: "" }));
+    } catch (err) { toast.error(formatApiError(err)); }
+    finally { setInjurySaving(false); }
+  }
+
   async function onSubmit(e) {
     e.preventDefault();
     if (!form.athlete_id) { toast.error("Selecione um atleta"); return; }
@@ -236,6 +257,16 @@ export default function LogSession() {
                 className="flex items-center gap-1.5 px-3 py-1.5 border border-[#737373] text-[#A3A3A3] hover:bg-white/5 hover:text-white font-head text-[11px] uppercase tracking-widest transition-all disabled:opacity-40"
               >
                 <Coffee className="w-3.5 h-3.5" /> {restSaving ? "A guardar..." : "Folga (Atleta)"}
+              </button>
+              <button
+                type="button"
+                onClick={markInjuryDay}
+                disabled={injurySaving || !form.athlete_id}
+                data-testid="mark-injury-day"
+                title="Marca o dia como lesão (0 UA, dilui média). Após fim da lesão, registo normal volta."
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-[#A855F7]/60 text-[#A855F7] hover:bg-[#A855F7]/10 font-head text-[11px] uppercase tracking-widest transition-all disabled:opacity-40"
+              >
+                <HeartPulse className="w-3.5 h-3.5" /> {injurySaving ? "A guardar..." : "Lesão"}
               </button>
               <button
                 type="button"

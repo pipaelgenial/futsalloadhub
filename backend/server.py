@@ -194,7 +194,7 @@ class SessionUpdate(BaseModel):
     notes: Optional[str] = None
 
 
-VALID_SESSION_TYPES = {"training", "match", "gym", "recovery", "rest"}
+VALID_SESSION_TYPES = {"training", "match", "gym", "recovery", "rest", "injury"}
 
 
 class RestDayIn(BaseModel):
@@ -215,6 +215,20 @@ class PlayerRestDayIn(BaseModel):
     date: str
     sleep_quality: Optional[int] = Field(default=None, ge=1, le=5)
     wellness: Optional[int] = Field(default=None, ge=1, le=10)
+    notes: Optional[str] = None
+
+
+class InjuryDayIn(BaseModel):
+    """Session-level injury entry (NOT the same as full Injury record).
+    Marks a single day as injury — counts as 0 UA, dilutes averages like rest.
+    """
+    athlete_id: str
+    date: str  # YYYY-MM-DD
+    notes: Optional[str] = None
+
+
+class PlayerInjuryDayIn(BaseModel):
+    date: str
     notes: Optional[str] = None
 
 
@@ -765,14 +779,17 @@ async def create_session(data: SessionIn, user=Depends(get_current_user)):
         raise HTTPException(400, "Tipo de sessão inválido")
     if data.session_type == "rest":
         raise HTTPException(400, "Use o endpoint /api/sessions/rest para marcar folga")
-    # Prevent registering a normal session on a day already marked as REST
-    rest_existing = await db.sessions.find_one({
+    if data.session_type == "injury":
+        raise HTTPException(400, "Use o endpoint /api/sessions/injury para marcar lesão")
+    # Prevent registering a normal session on a day already marked as REST or INJURY
+    existing_zero = await db.sessions.find_one({
         "athlete_id": data.athlete_id,
         "date": data.date,
-        "session_type": "rest",
+        "session_type": {"$in": ["rest", "injury"]},
     })
-    if rest_existing:
-        raise HTTPException(409, "Este dia está marcado como folga. Apaga a folga antes de registar uma sessão.")
+    if existing_zero:
+        kind = "folga" if existing_zero["session_type"] == "rest" else "lesão"
+        raise HTTPException(409, f"Este dia está marcado como {kind}. Apaga primeiro antes de registar uma sessão.")
     session_id = str(uuid.uuid4())
     load = data.rpe * data.duration_min
     doc = {
@@ -824,6 +841,44 @@ async def create_rest_day(data: RestDayIn, user=Depends(get_current_user)):
         "sleep_quality": data.sleep_quality,
         "wellness": data.wellness,
         "session_type": "rest",
+        "load": 0,
+        "notes": data.notes,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.sessions.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.post("/sessions/injury")
+async def create_injury_day(data: InjuryDayIn, user=Depends(get_current_user)):
+    """Coach marks a single day as INJURY for an athlete.
+
+    Stored as a 0-UA session (session_type='injury'). Dilutes averages like
+    a rest day. Does NOT auto-create an Injury record (use /api/injuries
+    endpoints for that).
+    """
+    team = await _get_team_or_404(user)
+    athlete = await db.athletes.find_one({"id": data.athlete_id, "team_id": team["id"]})
+    if not athlete:
+        raise HTTPException(404, "Atleta não encontrado")
+    existing = await db.sessions.find_one({
+        "athlete_id": data.athlete_id,
+        "date": data.date,
+    })
+    if existing:
+        raise HTTPException(409, "Já existe um registo para este atleta nesta data")
+    session_id = str(uuid.uuid4())
+    doc = {
+        "id": session_id,
+        "athlete_id": data.athlete_id,
+        "team_id": team["id"],
+        "date": data.date,
+        "rpe": 0,
+        "duration_min": 0,
+        "sleep_quality": None,
+        "wellness": None,
+        "session_type": "injury",
         "load": 0,
         "notes": data.notes,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -2655,14 +2710,15 @@ async def player_create_session(data: PlayerSessionIn, user=Depends(require_play
         raise HTTPException(400, "Conta sem atleta associado")
     if data.session_type not in {"training", "match", "gym", "recovery"}:
         raise HTTPException(400, "Tipo de sessão inválido")
-    # Prevent registering a normal session on a day already marked as REST
+    # Prevent registering a normal session on a day already marked as REST or INJURY
     rest_existing = await db.sessions.find_one({
         "athlete_id": user["athlete_id"],
         "date": data.date,
-        "session_type": "rest",
+        "session_type": {"$in": ["rest", "injury"]},
     })
     if rest_existing:
-        raise HTTPException(409, "Este dia está marcado como folga. Apaga a folga antes de registar uma sessão.")
+        kind = "folga" if rest_existing["session_type"] == "rest" else "lesão"
+        raise HTTPException(409, f"Este dia está marcado como {kind}. Apaga primeiro antes de registar uma sessão.")
     load = int(data.rpe) * int(data.duration_min)
     session_id = str(uuid.uuid4())
     doc = {
@@ -2719,6 +2775,37 @@ async def player_create_rest_day(data: PlayerRestDayIn, user=Depends(require_pla
     return {k: v for k, v in doc.items() if k not in {"load", "_id"}}
 
 
+@api.post("/player/sessions/injury")
+async def player_create_injury_day(data: PlayerInjuryDayIn, user=Depends(require_player)):
+    """Player marks a date as INJURY (no load, dilutes averages like rest)."""
+    if not user.get("athlete_id") or not user.get("team_id"):
+        raise HTTPException(400, "Conta sem atleta associado")
+    existing = await db.sessions.find_one({
+        "athlete_id": user["athlete_id"],
+        "date": data.date,
+    })
+    if existing:
+        raise HTTPException(409, "Já existe um registo para este dia")
+    session_id = str(uuid.uuid4())
+    doc = {
+        "id": session_id,
+        "athlete_id": user["athlete_id"],
+        "team_id": user["team_id"],
+        "date": data.date,
+        "session_type": "injury",
+        "rpe": 0,
+        "duration_min": 0,
+        "load": 0,
+        "sleep_quality": None,
+        "wellness": None,
+        "notes": data.notes,
+        "created_by": "player",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.sessions.insert_one(doc)
+    return {k: v for k, v in doc.items() if k not in {"load", "_id"}}
+
+
 # ============================================================
 # EXPORTS — CSV (sessions) + PDF (weekly/monthly summaries)
 # ============================================================
@@ -2748,7 +2835,7 @@ async def export_sessions_csv(
     athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).to_list(500)
     a_map = {a["id"]: a for a in athletes}
 
-    type_label = {"training": "Treino", "match": "Jogo", "gym": "Ginásio", "recovery": "Recuperação", "rest": "Folga"}
+    type_label = {"training": "Treino", "match": "Jogo", "gym": "Ginásio", "recovery": "Recuperação", "rest": "Folga", "injury": "Lesão"}
     buf = io.StringIO()
     buf.write("\ufeff")  # BOM so Excel reads UTF-8 correctly
     writer = _csv.writer(buf, delimiter=";")
