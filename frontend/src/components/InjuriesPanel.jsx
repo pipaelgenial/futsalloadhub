@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
-import { Plus, X, ShieldAlert } from "lucide-react";
+import { Plus, X, ShieldAlert, Pencil, Check } from "lucide-react";
 
 const SEVERITY_META = {
   low: { label: "Ligeira", color: "#FFEA00" },
@@ -26,6 +26,8 @@ export default function InjuriesPanel({ athleteId, refreshKey, onChange }) {
     notes: "",
   });
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editEnd, setEditEnd] = useState("");
 
   async function load() {
     try {
@@ -35,6 +37,27 @@ export default function InjuriesPanel({ athleteId, refreshKey, onChange }) {
   }
 
   useEffect(() => { load(); }, [athleteId, refreshKey]);
+
+  async function closeInjury(id) {
+    if (!editEnd) { toast.error("Indica a data de fim"); return; }
+    try {
+      await http.put(`/injuries/${id}`, { end_date: editEnd });
+      toast.success("Lesão fechada");
+      setEditingId(null);
+      setEditEnd("");
+      load();
+      onChange?.();
+    } catch (err) { toast.error(formatApiError(err)); }
+  }
+
+  async function reopenInjury(id) {
+    try {
+      await http.put(`/injuries/${id}`, { end_date: "" });
+      toast.success("Lesão reaberta");
+      load();
+      onChange?.();
+    } catch (err) { toast.error(formatApiError(err)); }
+  }
 
   async function create(e) {
     e.preventDefault();
@@ -148,10 +171,54 @@ export default function InjuriesPanel({ athleteId, refreshKey, onChange }) {
                     {inj.body_part} · {inj.start_date}{inj.end_date ? ` → ${inj.end_date}` : " → em curso"}
                   </div>
                   {inj.notes && <div className="text-xs text-[#525252] mt-1">{inj.notes}</div>}
+                  {editingId === inj.id && active && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2" data-testid={`edit-injury-row-${inj.id}`}>
+                      <span className="text-[10px] uppercase tracking-widest text-[#525252]">Data de fim:</span>
+                      <input
+                        type="date"
+                        value={editEnd}
+                        onChange={(e) => setEditEnd(e.target.value)}
+                        className="fld-input py-1 text-xs"
+                        data-testid={`edit-injury-date-${inj.id}`}
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => closeInjury(inj.id)}
+                        data-testid={`save-injury-${inj.id}`}
+                        className="text-[10px] uppercase tracking-widest px-2 py-1 border border-[#CCFF00]/40 text-[#CCFF00] hover:bg-[#CCFF00]/10 flex items-center gap-1"
+                      >
+                        <Check className="w-3 h-3" /> Fechar lesão
+                      </button>
+                      <button onClick={() => { setEditingId(null); setEditEnd(""); }} className="text-[10px] uppercase tracking-widest text-[#525252] hover:text-white">Cancelar</button>
+                    </div>
+                  )}
                 </div>
-                <button onClick={() => remove(inj.id)} className="text-[#525252] hover:text-[#FF3B30]" data-testid={`delete-injury-${inj.id}`}>
-                  <X className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {active ? (
+                    editingId !== inj.id && (
+                      <button
+                        onClick={() => { setEditingId(inj.id); setEditEnd(todayISO()); }}
+                        data-testid={`close-injury-btn-${inj.id}`}
+                        className="text-[#A3A3A3] hover:text-[#CCFF00]"
+                        title="Marcar como recuperado"
+                      >
+                        <Check className="w-4 h-4" />
+                      </button>
+                    )
+                  ) : (
+                    <button
+                      onClick={() => reopenInjury(inj.id)}
+                      data-testid={`reopen-injury-${inj.id}`}
+                      className="text-[#525252] hover:text-[#FF9500]"
+                      title="Reabrir lesão"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button onClick={() => remove(inj.id)} className="text-[#525252] hover:text-[#FF3B30]" data-testid={`delete-injury-${inj.id}`}>
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             );
           })}

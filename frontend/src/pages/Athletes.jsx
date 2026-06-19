@@ -149,7 +149,14 @@ export default function Athletes() {
                 </div>
               </div>
               <Link to={`/atletas/${a.id}`} className="block">
-                <div className="font-head text-xl font-bold mb-1 hover:text-[#CCFF00] transition-colors">{a.name}</div>
+                <div className="font-head text-xl font-bold mb-1 hover:text-[#CCFF00] transition-colors flex items-center gap-2">
+                  {a.name}
+                  {a.is_injured && (
+                    <span className="text-[9px] uppercase tracking-widest px-1.5 py-0.5 text-[#FF3B30] bg-[#FF3B30]/10 border border-[#FF3B30]/40" data-testid={`injured-badge-${a.id}`}>
+                      Lesionado
+                    </span>
+                  )}
+                </div>
                 <div className="text-xs text-[#A3A3A3] uppercase tracking-widest">{a.position || "Sem posição"}</div>
               </Link>
               <button

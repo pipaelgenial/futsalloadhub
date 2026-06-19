@@ -164,9 +164,9 @@ export default function NotificationsBell({ testid = "notifications-bell" }) {
       {open && (
         <div
           data-testid="notifications-dropdown"
-          className="absolute right-0 mt-2 w-[360px] max-w-[calc(100vw-2rem)] bg-[#0F0F0F] border border-white/10 z-50 shadow-2xl"
+          className="absolute right-0 mt-2 w-[360px] max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)] max-h-[calc(100vh-5rem)] flex flex-col bg-[#0F0F0F] border border-white/10 z-50 shadow-2xl"
         >
-          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
             <div>
               <div className="text-[9px] uppercase tracking-widest text-[#525252]">Notificações</div>
               <div className="font-head text-sm font-bold">
@@ -183,7 +183,7 @@ export default function NotificationsBell({ testid = "notifications-bell" }) {
             </button>
           </div>
 
-          <div className="max-h-[420px] overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto">
             {active.length === 0 && !showResolved && (
               <div className="text-center py-10 px-4 text-[#525252] text-sm" data-testid="notifications-empty">
                 <Check className="w-8 h-8 mx-auto mb-2 text-[#CCFF00]/50" />
@@ -264,7 +264,7 @@ export default function NotificationsBell({ testid = "notifications-bell" }) {
             <button
               onClick={clearResolved}
               data-testid="clear-resolved"
-              className="w-full text-[10px] uppercase tracking-widest text-[#A3A3A3] hover:text-white border-t border-white/10 py-2.5 transition-colors"
+              className="shrink-0 w-full text-[10px] uppercase tracking-widest text-[#A3A3A3] hover:text-white border-t border-white/10 py-2.5 transition-colors"
             >
               Limpar histórico de resolvidos
             </button>

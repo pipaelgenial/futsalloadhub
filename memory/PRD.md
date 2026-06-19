@@ -184,7 +184,17 @@ e estilo dashboard.
 - **Cleanup**: removidos 8 imports não usados (Dashboard, MonthlySummary, AdminPanel, Compare, Register), corrigidos 2 `raise X from None` em get_current_user.
 - **Conta de coach de teste** criada: `treinador@futsalloadhub.com` / `treinador` (status active, sem equipas).
 
-## Phase 15 — Deferred
+## Phase 15 — Editar/Fechar Lesão + Badge Lesionado + Widget Dashboard (18 Jun 2026)
+- **Backend**:
+  - `PUT /api/injuries/{injury_id}` aceita atualização parcial (esp. `end_date` para fechar). Empty string reabre.
+  - `GET /api/injuries/open` lista lesões abertas da equipa ativa com `athlete_name`, `athlete_jersey`, `athlete_photo_url` para o widget do Dashboard.
+  - `_sync_athlete_injury_flag` recalcula `athlete.is_injured` em cada create/update/delete de lesão (true se alguma lesão sem `end_date`).
+- **Frontend**:
+  - InjuriesPanel: botão check (Marcar como recuperado) abre input de data + botão "Fechar lesão". Botão lápis (Reabrir) em lesões fechadas.
+  - Dashboard: nova secção "LESÕES EM CURSO" com bordo vermelho, contagem e cards clicáveis (PlayerAvatar + nome + tipo + zona + data início) que ligam para `/atletas/{id}`.
+  - Athletes page: badge "Lesionado" (vermelho) ao lado do nome quando `is_injured=true`.
+
+## Phase 16 — Deferred
 ### P0
 - **Resumo Mensal Automático**: para cada atleta, média de carga e qualidade do sono
   por mês, com destaque de evolução (delta vs. mês anterior)

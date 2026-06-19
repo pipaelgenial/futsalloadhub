@@ -19,12 +19,20 @@ export default function Dashboard() {
   const [detailMetrics, setDetailMetrics] = useState(null);
   const [detailLabel, setDetailLabel] = useState("");
   const [selectedDetail, setSelectedDetail] = useState(TEAM_SELECTION);
+  const [openInjuries, setOpenInjuries] = useState([]);
 
   async function load() {
     setLoading(true);
     try {
       const { data } = await http.get("/analytics/team");
       setData(data);
+      // Load open injuries in parallel (silent on error)
+      try {
+        const { data: inj } = await http.get("/injuries/open");
+        setOpenInjuries(inj || []);
+      } catch {
+        setOpenInjuries([]);
+      }
     } catch (err) {
       toast.error(formatApiError(err));
     } finally { setLoading(false); }
@@ -309,6 +317,40 @@ export default function Dashboard() {
               </div>
             );
           })()}
+
+          {/* Open injuries */}
+          {openInjuries.length > 0 && (
+            <div className="fld-card border-l-4 border-l-[#FF3B30]" data-testid="open-injuries-panel">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-[#FF3B30]" />
+                  <div className="font-head text-2xl font-bold">LESÕES EM CURSO</div>
+                  <span className="metric-num text-[#FF3B30] text-lg ml-1">{openInjuries.length}</span>
+                </div>
+                <div className="text-[10px] uppercase tracking-widest text-[#525252]">Atletas indisponíveis</div>
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {openInjuries.map((inj) => (
+                  <Link
+                    key={inj.id}
+                    to={`/atletas/${inj.athlete_id}`}
+                    data-testid={`open-injury-${inj.id}`}
+                    className="flex items-center gap-3 p-3 border border-white/5 hover:border-[#FF3B30]/40 transition-all"
+                  >
+                    <PlayerAvatar athlete={{ name: inj.athlete_name, photo_url: inj.athlete_photo_url }} size={40} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        {inj.athlete_jersey && <span className="metric-num text-[#CCFF00] text-xs">#{inj.athlete_jersey}</span>}
+                        <span className="font-head text-sm font-bold truncate">{inj.athlete_name}</span>
+                      </div>
+                      <div className="text-[11px] text-[#FF3B30] truncate">{inj.type}</div>
+                      <div className="text-[10px] text-[#A3A3A3] truncate">{inj.body_part} · desde {inj.start_date}</div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Athletes table */}
           <div className="fld-card" data-testid="athletes-overview">

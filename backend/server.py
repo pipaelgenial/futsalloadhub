@@ -1402,15 +1402,90 @@ async def create_injury(data: InjuryIn, user=Depends(get_current_user)):
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.injuries.insert_one(doc)
+    await _sync_athlete_injury_flag(data.athlete_id, team["id"])
     doc.pop("_id", None)
     return doc
+
+
+class InjuryUpdate(BaseModel):
+    type: Optional[str] = None
+    body_part: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None  # set to ISO date to close; empty string or None re-opens
+    severity: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@api.put("/injuries/{injury_id}")
+async def update_injury(injury_id: str, data: InjuryUpdate, user=Depends(get_current_user)):
+    """Update an injury — typically to set `end_date` and close it."""
+    team = await _get_team_or_404(user)
+    existing = await db.injuries.find_one({"id": injury_id, "team_id": team["id"]})
+    if not existing:
+        raise HTTPException(404, "Lesão não encontrada")
+    update_fields: dict = {}
+    if data.type is not None:
+        update_fields["type"] = data.type
+    if data.body_part is not None:
+        update_fields["body_part"] = data.body_part
+    if data.start_date is not None:
+        update_fields["start_date"] = data.start_date
+    # end_date: empty string -> None (reopen); date string -> close; absent -> no change
+    if data.end_date is not None:
+        update_fields["end_date"] = data.end_date or None
+    if data.severity is not None:
+        if data.severity not in ("low", "medium", "high"):
+            raise HTTPException(400, "Severidade inválida")
+        update_fields["severity"] = data.severity
+    if data.notes is not None:
+        update_fields["notes"] = data.notes
+    if update_fields:
+        await db.injuries.update_one({"id": injury_id}, {"$set": update_fields})
+    await _sync_athlete_injury_flag(existing["athlete_id"], team["id"])
+    refreshed = await db.injuries.find_one({"id": injury_id}, {"_id": 0})
+    return refreshed
 
 
 @api.delete("/injuries/{injury_id}")
 async def delete_injury(injury_id: str, user=Depends(get_current_user)):
     team = await _get_team_or_404(user)
+    existing = await db.injuries.find_one({"id": injury_id, "team_id": team["id"]})
     await db.injuries.delete_one({"id": injury_id, "team_id": team["id"]})
+    if existing:
+        await _sync_athlete_injury_flag(existing["athlete_id"], team["id"])
     return {"ok": True}
+
+
+async def _sync_athlete_injury_flag(athlete_id: str, team_id: str) -> None:
+    """Set athlete.is_injured = True iff there is any injury without end_date."""
+    has_open = await db.injuries.find_one({
+        "athlete_id": athlete_id,
+        "team_id": team_id,
+        "$or": [{"end_date": None}, {"end_date": ""}, {"end_date": {"$exists": False}}],
+    })
+    await db.athletes.update_one({"id": athlete_id}, {"$set": {"is_injured": bool(has_open)}})
+
+
+@api.get("/injuries/open")
+async def list_open_injuries(user=Depends(get_current_user)):
+    """List all CURRENTLY OPEN injuries for the active team (Dashboard widget)."""
+    team = await _get_active_team(user, required=False)
+    if not team:
+        return []
+    items = await db.injuries.find({
+        "team_id": team["id"],
+        "$or": [{"end_date": None}, {"end_date": ""}, {"end_date": {"$exists": False}}],
+    }, {"_id": 0}).sort("start_date", -1).to_list(500)
+    if not items:
+        return []
+    athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).to_list(500)
+    a_map = {a["id"]: a for a in athletes}
+    for i in items:
+        a = a_map.get(i["athlete_id"], {})
+        i["athlete_name"] = a.get("name", "—")
+        i["athlete_jersey"] = a.get("jersey_number")
+        i["athlete_photo_url"] = a.get("photo_url")
+    return items
 
 
 # ---------------------- Alerts (computed on-the-fly) ----------------------
