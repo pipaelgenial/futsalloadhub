@@ -9,7 +9,13 @@ export default function AdminShell({ children }) {
     <div className="min-h-screen bg-[#0A0A0A] text-white grain">
       <div className="border-b border-white/5">
         <div className="max-w-6xl mx-auto flex items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => navigate("/admin")}
+            data-testid="admin-brand-home"
+            aria-label="Ir para o Painel Admin"
+            className="flex items-center gap-3 text-left hover:opacity-80 transition-opacity"
+          >
             <div className="w-9 h-9 bg-[#CCFF00] flex items-center justify-center">
               <Activity className="w-5 h-5 text-black" strokeWidth={3} />
             </div>
@@ -19,7 +25,7 @@ export default function AdminShell({ children }) {
                 <ShieldCheck className="w-3 h-3" /> Administração
               </div>
             </div>
-          </div>
+          </button>
           <div className="flex items-center gap-4">
             <div className="text-right hidden sm:block">
               <div className="text-[10px] uppercase tracking-widest text-[#525252]">Sessão de</div>

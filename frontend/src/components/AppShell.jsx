@@ -22,7 +22,13 @@ export default function AppShell({ children }) {
     <div className="min-h-screen bg-[#0A0A0A] text-white flex grain">
       {/* Sidebar */}
       <aside className="w-64 border-r border-white/5 bg-[#0A0A0A] hidden md:flex flex-col p-6 sticky top-0 h-screen z-10">
-        <div className="flex items-center gap-2 mb-6">
+        <button
+          type="button"
+          onClick={() => navigate("/")}
+          data-testid="brand-home"
+          aria-label="Ir para o Dashboard"
+          className="flex items-center gap-2 mb-6 text-left hover:opacity-80 transition-opacity"
+        >
           <div className="w-10 h-10 bg-[#CCFF00] flex items-center justify-center">
             <Activity className="w-6 h-6 text-black" strokeWidth={3} />
           </div>
@@ -30,7 +36,7 @@ export default function AppShell({ children }) {
             <div className="font-head text-xl font-extrabold leading-none">FUTSAL</div>
             <div className="font-head text-xs text-[#CCFF00] tracking-[0.3em] leading-none mt-0.5">LOAD HUB</div>
           </div>
-        </div>
+        </button>
 
         {/* Team switcher + notifications */}
         <div className="mb-6 flex items-stretch gap-2">
@@ -77,12 +83,18 @@ export default function AppShell({ children }) {
       <main className="flex-1 min-w-0 relative z-[2]">
         {/* Mobile top bar */}
         <div className="md:hidden flex items-center justify-between p-4 border-b border-white/5 gap-3">
-          <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => navigate("/")}
+            data-testid="brand-home-mobile"
+            aria-label="Ir para o Dashboard"
+            className="flex items-center gap-2 shrink-0 hover:opacity-80 transition-opacity"
+          >
             <div className="w-8 h-8 bg-[#CCFF00] flex items-center justify-center">
               <Activity className="w-5 h-5 text-black" strokeWidth={3} />
             </div>
             <span className="font-head font-extrabold text-sm">FUTSAL</span>
-          </div>
+          </button>
           <div className="flex-1 min-w-0 max-w-[260px]">
             <TeamSwitcher />
           </div>

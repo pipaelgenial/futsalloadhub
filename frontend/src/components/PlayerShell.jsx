@@ -23,7 +23,13 @@ export default function PlayerShell({ children }) {
     <div className="min-h-screen bg-[#0A0A0A] text-white grain">
       <div className="border-b border-white/5">
         <div className="max-w-4xl mx-auto flex items-center justify-between px-5 py-4 gap-3">
-          <div className="flex items-center gap-3 min-w-0">
+          <button
+            type="button"
+            onClick={() => navigate("/atleta")}
+            data-testid="player-brand-home"
+            aria-label="Ir para o Resumo"
+            className="flex items-center gap-3 min-w-0 text-left hover:opacity-80 transition-opacity"
+          >
             <div className="w-9 h-9 bg-[#CCFF00] flex items-center justify-center shrink-0">
               <Activity className="w-5 h-5 text-black" strokeWidth={3} />
             </div>
@@ -33,7 +39,7 @@ export default function PlayerShell({ children }) {
                 {me?.team?.name || "Vista de Atleta"}
               </div>
             </div>
-          </div>
+          </button>
           <button
             onClick={async () => { await logout(); navigate("/login"); }}
             data-testid="player-logout"
