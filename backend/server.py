@@ -957,6 +957,39 @@ def _parse_date(s: str) -> date:
     return datetime.strptime(s, "%Y-%m-%d").date()
 
 
+def _aggregate_period(sessions_in_period: list) -> dict:
+    """Aggregate stats for a list of sessions (week/month).
+
+    Rest sessions (session_type='rest') are excluded from session counts and
+    avg_load (load is meaningless there), but contribute 0 to total_load. Sleep
+    and wellness averages exclude None values regardless of session type.
+
+    Returns None for averages when there is no valid data — frontend charts can
+    then render gaps instead of misleading zero dips.
+    """
+    if not sessions_in_period:
+        return {"total_load": 0, "avg_load": None, "avg_sleep": None,
+                "avg_wellness": None, "sessions": 0, "rest_days": 0}
+    training = [s for s in sessions_in_period if s.get("session_type") != "rest"]
+    rest_count = len(sessions_in_period) - len(training)
+    total_load = sum(s["load"] for s in sessions_in_period)
+    avg_load = round(total_load / len(training), 1) if training else None
+    sleep_vals = [s["sleep_quality"] for s in sessions_in_period
+                  if s.get("sleep_quality") is not None]
+    avg_sleep = round(sum(sleep_vals) / len(sleep_vals), 2) if sleep_vals else None
+    wellness_vals = [s.get("wellness") for s in sessions_in_period
+                     if s.get("wellness") is not None]
+    avg_wellness = round(sum(wellness_vals) / len(wellness_vals), 1) if wellness_vals else None
+    return {
+        "total_load": round(total_load, 1),
+        "avg_load": avg_load,
+        "avg_sleep": avg_sleep,
+        "avg_wellness": avg_wellness,
+        "sessions": len(training),
+        "rest_days": rest_count,
+    }
+
+
 def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None) -> dict:
     """Compute ACWR, acute, chronic, monotony, strain, risk for one athlete."""
     if ref_date is None:
@@ -1144,8 +1177,17 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None)
     else:
         risk_description = " · ".join(risk_reasons)
 
-    avg_load = round(sum(s["load"] for s in sessions) / len(sessions), 1)
-    avg_sleep = round(sum(s["sleep_quality"] for s in sessions) / len(sessions), 1)
+    # Averages — exclude rest days (load/sleep aren't meaningful there).
+    # Rest days still count in ACWR/Monotonia/Strain via the 7/28-day windows
+    # (each rest day contributes 0 UA, which is the standard convention).
+    training_sessions = [s for s in sessions if s.get("session_type") != "rest"]
+    rest_count = len(sessions) - len(training_sessions)
+    if training_sessions:
+        avg_load = round(sum(s["load"] for s in training_sessions) / len(training_sessions), 1)
+    else:
+        avg_load = 0
+    sleep_vals = [s["sleep_quality"] for s in sessions if s.get("sleep_quality") is not None]
+    avg_sleep = round(sum(sleep_vals) / len(sleep_vals), 1) if sleep_vals else 0
     wellness_vals = [s.get("wellness") for s in sessions if s.get("wellness") is not None]
     avg_wellness = round(sum(wellness_vals) / len(wellness_vals), 1) if wellness_vals else 0
 
@@ -1167,7 +1209,8 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None)
         "risk_reasons": risk_reasons,
         "days_since_first": days_since_first,
         "sufficient_data": sufficient,
-        "total_sessions": len(sessions),
+        "total_sessions": len(training_sessions),
+        "rest_days": rest_count,
         "avg_load": avg_load,
         "avg_sleep": avg_sleep,
         "first_date": first_date.isoformat(),
@@ -1327,25 +1370,18 @@ async def weekly_summary(athlete_id: str, weeks: int = 8, user=Depends(get_curre
     prev_avg = None
     for k in keys:
         ws = by_week.get(k, [])
-        if ws:
-            total_load = sum(s["load"] for s in ws)
-            avg_load = round(total_load / len(ws), 1)
-            avg_sleep = round(sum(s["sleep_quality"] for s in ws) / len(ws), 2)
-            wellness_vals = [s.get("wellness") for s in ws if s.get("wellness") is not None]
-            avg_wellness = round(sum(wellness_vals) / len(wellness_vals), 1) if wellness_vals else 0
-            sessions_count = len(ws)
-        else:
-            total_load = 0
-            avg_load = 0
-            avg_sleep = 0
-            avg_wellness = 0
-            sessions_count = 0
+        agg = _aggregate_period(ws)
+        total_load = agg["total_load"]
+        avg_load = agg["avg_load"]
+        avg_sleep = agg["avg_sleep"]
+        avg_wellness = agg["avg_wellness"]
+        sessions_count = agg["sessions"]
         delta = None
         delta_pct = None
-        if prev_avg is not None and prev_avg > 0 and avg_load > 0:
+        if prev_avg is not None and prev_avg > 0 and avg_load and avg_load > 0:
             delta = round(avg_load - prev_avg, 1)
             delta_pct = round((avg_load - prev_avg) / prev_avg * 100, 1)
-        if avg_load > 0:
+        if avg_load and avg_load > 0:
             prev_avg = avg_load
         # parse week start date
         y, w = k.split("-W")
@@ -1356,7 +1392,8 @@ async def weekly_summary(athlete_id: str, weeks: int = 8, user=Depends(get_curre
             "start_date": start_d.isoformat(),
             "end_date": (start_d + timedelta(days=6)).isoformat(),
             "sessions": sessions_count,
-            "total_load": round(total_load, 1),
+            "rest_days": agg["rest_days"],
+            "total_load": total_load,
             "avg_load": avg_load,
             "avg_sleep": avg_sleep,
             "avg_wellness": avg_wellness,
@@ -1364,7 +1401,7 @@ async def weekly_summary(athlete_id: str, weeks: int = 8, user=Depends(get_curre
             "delta_load_pct": delta_pct,
         })
 
-    valid = [m for m in weeks_out if m["avg_load"] > 0]
+    valid = [m for m in weeks_out if m["avg_load"] and m["avg_load"] > 0]
     if len(valid) >= 2:
         first_v = valid[0]["avg_load"]
         last_v = valid[-1]["avg_load"]
@@ -1413,27 +1450,23 @@ async def monthly_summary(athlete_id: str, months: int = 6, user=Depends(get_cur
     prev_avg = None
     for k in keys:
         ms = by_month.get(k, [])
-        if ms:
-            total_load = sum(s["load"] for s in ms)
-            avg_load = round(total_load / len(ms), 1)
-            avg_sleep = round(sum(s["sleep_quality"] for s in ms) / len(ms), 2)
-            sessions_count = len(ms)
-        else:
-            total_load = 0
-            avg_load = 0
-            avg_sleep = 0
-            sessions_count = 0
+        agg = _aggregate_period(ms)
+        total_load = agg["total_load"]
+        avg_load = agg["avg_load"]
+        avg_sleep = agg["avg_sleep"]
+        sessions_count = agg["sessions"]
         delta = None
         delta_pct = None
-        if prev_avg is not None and prev_avg > 0 and avg_load > 0:
+        if prev_avg is not None and prev_avg > 0 and avg_load and avg_load > 0:
             delta = round(avg_load - prev_avg, 1)
             delta_pct = round((avg_load - prev_avg) / prev_avg * 100, 1)
-        if avg_load > 0:
+        if avg_load and avg_load > 0:
             prev_avg = avg_load
         months_out.append({
             "month": k,
             "sessions": sessions_count,
-            "total_load": round(total_load, 1),
+            "rest_days": agg["rest_days"],
+            "total_load": total_load,
             "avg_load": avg_load,
             "avg_sleep": avg_sleep,
             "delta_load": delta,
@@ -1441,7 +1474,7 @@ async def monthly_summary(athlete_id: str, months: int = 6, user=Depends(get_cur
         })
 
     # overall evolution
-    valid = [m for m in months_out if m["avg_load"] > 0]
+    valid = [m for m in months_out if m["avg_load"] and m["avg_load"] > 0]
     if len(valid) >= 2:
         first = valid[0]["avg_load"]
         last = valid[-1]["avg_load"]
@@ -1796,8 +1829,12 @@ async def delete_planned(planned_id: str, user=Depends(get_current_user)):
 
 
 @api.get("/calendar")
-async def calendar_view(start: str, days: int = 28, user=Depends(get_current_user)):
-    """Day-by-day aggregate of recorded sessions and planned sessions for the team."""
+async def calendar_view(start: str, days: int = 28, athlete_id: Optional[str] = None, user=Depends(get_current_user)):
+    """Day-by-day aggregate of recorded sessions and planned sessions.
+
+    If `athlete_id` is provided, restrict the view to that athlete only.
+    Otherwise show the full team aggregate.
+    """
     team = await _get_active_team(user, required=False)
     if team:
         team = {k: v for k, v in team.items() if k != "_id"}
@@ -1806,12 +1843,28 @@ async def calendar_view(start: str, days: int = 28, user=Depends(get_current_use
     start_d = _parse_date(start)
     end_d = start_d + timedelta(days=days - 1)
     end_iso = end_d.isoformat()
-    sessions = await db.sessions.find(
-        {"team_id": team["id"], "date": {"$gte": start, "$lte": end_iso}}, {"_id": 0}
-    ).to_list(5000)
-    planned = await db.planned_sessions.find(
-        {"team_id": team["id"], "date": {"$gte": start, "$lte": end_iso}}, {"_id": 0}
-    ).to_list(1000)
+    s_filter = {"team_id": team["id"], "date": {"$gte": start, "$lte": end_iso}}
+    p_filter = {"team_id": team["id"], "date": {"$gte": start, "$lte": end_iso}}
+    if athlete_id:
+        # Validate athlete belongs to this team
+        owns = await db.athletes.count_documents({"id": athlete_id, "team_id": team["id"]})
+        if not owns:
+            raise HTTPException(404, "Atleta não encontrado")
+        s_filter["athlete_id"] = athlete_id
+        # planned sessions: keep team-wide (athlete_ids None/[] = whole team) or
+        # those that explicitly include this athlete
+        p_filter = {
+            "team_id": team["id"],
+            "date": {"$gte": start, "$lte": end_iso},
+            "$or": [
+                {"athlete_ids": {"$in": [athlete_id]}},
+                {"athlete_ids": {"$exists": False}},
+                {"athlete_ids": None},
+                {"athlete_ids": []},
+            ],
+        }
+    sessions = await db.sessions.find(s_filter, {"_id": 0}).to_list(5000)
+    planned = await db.planned_sessions.find(p_filter, {"_id": 0}).to_list(1000)
     athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).to_list(500)
     a_map = {a["id"]: a for a in athletes}
 
@@ -1992,25 +2045,18 @@ async def weekly_team_overview(weeks: int = 8, user=Depends(get_current_user)):
     prev_avg = None
     for k in keys:
         ws = by_week.get(k, [])
-        if ws:
-            total_load = sum(s["load"] for s in ws)
-            avg_load = round(total_load / len(ws), 1)
-            avg_sleep = round(sum(s["sleep_quality"] for s in ws) / len(ws), 2)
-            wellness_vals = [s.get("wellness") for s in ws if s.get("wellness") is not None]
-            avg_wellness = round(sum(wellness_vals) / len(wellness_vals), 1) if wellness_vals else 0
-            sessions_count = len(ws)
-        else:
-            total_load = 0
-            avg_load = 0
-            avg_sleep = 0
-            avg_wellness = 0
-            sessions_count = 0
+        agg = _aggregate_period(ws)
+        total_load = agg["total_load"]
+        avg_load = agg["avg_load"]
+        avg_sleep = agg["avg_sleep"]
+        avg_wellness = agg["avg_wellness"]
+        sessions_count = agg["sessions"]
         delta = None
         delta_pct = None
-        if prev_avg is not None and prev_avg > 0 and avg_load > 0:
+        if prev_avg is not None and prev_avg > 0 and avg_load and avg_load > 0:
             delta = round(avg_load - prev_avg, 1)
             delta_pct = round((avg_load - prev_avg) / prev_avg * 100, 1)
-        if avg_load > 0:
+        if avg_load and avg_load > 0:
             prev_avg = avg_load
         y, w = k.split("-W")
         start_d = _week_start(int(y), int(w))
@@ -2020,7 +2066,8 @@ async def weekly_team_overview(weeks: int = 8, user=Depends(get_current_user)):
             "start_date": start_d.isoformat(),
             "end_date": (start_d + timedelta(days=6)).isoformat(),
             "sessions": sessions_count,
-            "total_load": round(total_load, 1),
+            "rest_days": agg["rest_days"],
+            "total_load": total_load,
             "avg_load": avg_load,
             "avg_sleep": avg_sleep,
             "avg_wellness": avg_wellness,
@@ -2028,7 +2075,7 @@ async def weekly_team_overview(weeks: int = 8, user=Depends(get_current_user)):
             "delta_load_pct": delta_pct,
         })
 
-    valid = [m for m in weeks_out if m["avg_load"] > 0]
+    valid = [m for m in weeks_out if m["avg_load"] and m["avg_load"] > 0]
     if len(valid) >= 2:
         first_v = valid[0]["avg_load"]
         last_v = valid[-1]["avg_load"]
@@ -2077,34 +2124,30 @@ async def monthly_team_overview(months: int = 6, user=Depends(get_current_user))
     prev_avg = None
     for k in keys:
         ms = by_month.get(k, [])
-        if ms:
-            total_load = sum(s["load"] for s in ms)
-            avg_load = round(total_load / len(ms), 1)
-            avg_sleep = round(sum(s["sleep_quality"] for s in ms) / len(ms), 2)
-            sessions_count = len(ms)
-        else:
-            total_load = 0
-            avg_load = 0
-            avg_sleep = 0
-            sessions_count = 0
+        agg = _aggregate_period(ms)
+        total_load = agg["total_load"]
+        avg_load = agg["avg_load"]
+        avg_sleep = agg["avg_sleep"]
+        sessions_count = agg["sessions"]
         delta = None
         delta_pct = None
-        if prev_avg is not None and prev_avg > 0 and avg_load > 0:
+        if prev_avg is not None and prev_avg > 0 and avg_load and avg_load > 0:
             delta = round(avg_load - prev_avg, 1)
             delta_pct = round((avg_load - prev_avg) / prev_avg * 100, 1)
-        if avg_load > 0:
+        if avg_load and avg_load > 0:
             prev_avg = avg_load
         months_out.append({
             "month": k,
             "sessions": sessions_count,
-            "total_load": round(total_load, 1),
+            "rest_days": agg["rest_days"],
+            "total_load": total_load,
             "avg_load": avg_load,
             "avg_sleep": avg_sleep,
             "delta_load": delta,
             "delta_load_pct": delta_pct,
         })
 
-    valid = [m for m in months_out if m["avg_load"] > 0]
+    valid = [m for m in months_out if m["avg_load"] and m["avg_load"] > 0]
     if len(valid) >= 2:
         first_v = valid[0]["avg_load"]
         last_v = valid[-1]["avg_load"]

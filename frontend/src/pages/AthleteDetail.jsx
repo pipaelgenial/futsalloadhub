@@ -229,7 +229,9 @@ export default function AthleteDetail() {
               <tbody>
                 {sessions.slice(0, 30).map((s) => {
                   const isEditing = editing === s.id;
+                  const isRest = s.session_type === "rest";
                   const wellness = s.wellness ?? "—";
+                  const sleep = s.sleep_quality ?? "—";
                   if (isEditing) {
                     const computed = (Number(editForm.rpe) || 0) * (Number(editForm.duration_min) || 0);
                     return (
@@ -274,11 +276,11 @@ export default function AthleteDetail() {
                     <tr key={s.id} className="border-b border-white/5" data-testid={`session-row-${s.id}`}>
                       <td className="py-2 pr-4">{s.date}</td>
                       <td className="py-2 px-2"><SessionTypeBadge type={s.session_type || "training"} size="sm" /></td>
-                      <td className="py-2 px-2 metric-num">{s.rpe}</td>
-                      <td className="py-2 px-2">{s.duration_min}min</td>
-                      <td className="py-2 px-2">{s.sleep_quality}/5</td>
-                      <td className="py-2 px-2 metric-num">{wellness}<span className="text-[#525252] text-xs">/10</span></td>
-                      <td className="py-2 px-2 metric-num text-[#CCFF00]">{s.load}</td>
+                      <td className="py-2 px-2 metric-num">{isRest ? "—" : s.rpe}</td>
+                      <td className="py-2 px-2">{isRest ? "—" : `${s.duration_min}min`}</td>
+                      <td className="py-2 px-2">{isRest ? <span className="text-[#525252]">—</span> : `${sleep}/5`}</td>
+                      <td className="py-2 px-2 metric-num">{isRest ? <span className="text-[#525252]">—</span> : (<>{wellness}<span className="text-[#525252] text-xs">/10</span></>)}</td>
+                      <td className="py-2 px-2 metric-num text-[#CCFF00]">{isRest ? <span className="text-[#525252]">0</span> : s.load}</td>
                       <td className="py-2 px-2">
                         <div className="flex justify-end gap-2">
                           <button onClick={() => startEdit(s)} className="text-[#525252] hover:text-[#CCFF00]" data-testid={`edit-session-${s.id}`} title="Editar">

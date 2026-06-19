@@ -181,12 +181,17 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(null);
   const [thresholds, setThresholds] = useState(DEFAULT_THRESHOLDS);
+  const [athletes, setAthletes] = useState([]);
+  const [athleteFilter, setAthleteFilter] = useState("all"); // "all" or athlete_id
 
-  // Fetch active team thresholds
+  // Fetch active team thresholds + athlete list
   useEffect(() => {
     http.get("/team").then(({ data }) => {
       if (data?.load_thresholds) setThresholds(data.load_thresholds);
     }).catch(() => { /* keep defaults */ });
+    http.get("/athletes").then(({ data }) => {
+      setAthletes(Array.isArray(data) ? data : []);
+    }).catch(() => { /* ignore */ });
   }, []);
 
   // Active query (start, days, list of months to render)
@@ -212,14 +217,15 @@ export default function CalendarPage() {
     setLoading(true);
     try {
       const startISO = isoDate(query.start);
-      const { data } = await http.get(`/calendar?start=${startISO}&days=${query.days}`);
+      const qs = athleteFilter !== "all" ? `&athlete_id=${athleteFilter}` : "";
+      const { data } = await http.get(`/calendar?start=${startISO}&days=${query.days}${qs}`);
       const map = {};
       (data.days || []).forEach((d) => { map[d.date] = d; });
       setDaysData(map);
     } catch (err) { toast.error(formatApiError(err)); }
     finally { setLoading(false); }
   }
-  useEffect(() => { load(); }, [query.start.getTime(), query.days]);  
+  useEffect(() => { load(); }, [query.start.getTime(), query.days, athleteFilter]);  
 
   function shiftMonth(n) {
     let m = monthIdx + n;
@@ -267,6 +273,18 @@ export default function CalendarPage() {
           <p className="text-[#A3A3A3] text-xs sm:text-sm mt-2">Cor da célula pelo tipo de sessão · Cor do número pela carga</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <select
+            value={athleteFilter}
+            onChange={(e) => setAthleteFilter(e.target.value)}
+            className="fld-input py-2 text-sm min-w-[160px]"
+            data-testid="cal-athlete-filter"
+            title="Ver toda a equipa ou apenas um atleta"
+          >
+            <option value="all">Equipa (todos)</option>
+            {athletes.map((a) => (
+              <option key={a.id} value={a.id}>{a.name}{a.jersey_number ? ` #${a.jersey_number}` : ""}</option>
+            ))}
+          </select>
           <button onClick={() => shiftMonth(-1)} className="fld-btn-ghost px-3 py-2" data-testid="cal-prev"><ChevronLeft className="w-4 h-4" /></button>
           <select
             value={`${year}-${monthIdx}`}
