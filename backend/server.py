@@ -960,9 +960,9 @@ def _parse_date(s: str) -> date:
 def _aggregate_period(sessions_in_period: list) -> dict:
     """Aggregate stats for a list of sessions (week/month).
 
-    Rest sessions (session_type='rest') are excluded from session counts and
-    avg_load (load is meaningless there), but contribute 0 to total_load. Sleep
-    and wellness averages exclude None values regardless of session type.
+    Rest sessions count as 0-load days that DILUTE avg_load (matches the user
+    convention: avg_load = total_load / total_days_recorded). Sleep and wellness
+    averages exclude None values (rest days typically have no sleep/wellness).
 
     Returns None for averages when there is no valid data — frontend charts can
     then render gaps instead of misleading zero dips.
@@ -970,10 +970,9 @@ def _aggregate_period(sessions_in_period: list) -> dict:
     if not sessions_in_period:
         return {"total_load": 0, "avg_load": None, "avg_sleep": None,
                 "avg_wellness": None, "sessions": 0, "rest_days": 0}
-    training = [s for s in sessions_in_period if s.get("session_type") != "rest"]
-    rest_count = len(sessions_in_period) - len(training)
+    rest_count = sum(1 for s in sessions_in_period if s.get("session_type") == "rest")
     total_load = sum(s["load"] for s in sessions_in_period)
-    avg_load = round(total_load / len(training), 1) if training else None
+    avg_load = round(total_load / len(sessions_in_period), 1)
     sleep_vals = [s["sleep_quality"] for s in sessions_in_period
                   if s.get("sleep_quality") is not None]
     avg_sleep = round(sum(sleep_vals) / len(sleep_vals), 2) if sleep_vals else None
@@ -985,7 +984,7 @@ def _aggregate_period(sessions_in_period: list) -> dict:
         "avg_load": avg_load,
         "avg_sleep": avg_sleep,
         "avg_wellness": avg_wellness,
-        "sessions": len(training),
+        "sessions": len(sessions_in_period),
         "rest_days": rest_count,
     }
 
@@ -1177,15 +1176,11 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None)
     else:
         risk_description = " · ".join(risk_reasons)
 
-    # Averages — exclude rest days (load/sleep aren't meaningful there).
-    # Rest days still count in ACWR/Monotonia/Strain via the 7/28-day windows
-    # (each rest day contributes 0 UA, which is the standard convention).
-    training_sessions = [s for s in sessions if s.get("session_type") != "rest"]
-    rest_count = len(sessions) - len(training_sessions)
-    if training_sessions:
-        avg_load = round(sum(s["load"] for s in training_sessions) / len(training_sessions), 1)
-    else:
-        avg_load = 0
+    # Averages — rest days DILUTE avg_load (count in denominator, contributing 0).
+    # Rest days count as 0-UA days in the 7/28-day ACWR window (standard convention).
+    # Sleep/wellness exclude None values (rest days have no value to average).
+    rest_count = sum(1 for s in sessions if s.get("session_type") == "rest")
+    avg_load = round(sum(s["load"] for s in sessions) / len(sessions), 1)
     sleep_vals = [s["sleep_quality"] for s in sessions if s.get("sleep_quality") is not None]
     avg_sleep = round(sum(sleep_vals) / len(sleep_vals), 1) if sleep_vals else 0
     wellness_vals = [s.get("wellness") for s in sessions if s.get("wellness") is not None]
@@ -1209,7 +1204,7 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None)
         "risk_reasons": risk_reasons,
         "days_since_first": days_since_first,
         "sufficient_data": sufficient,
-        "total_sessions": len(training_sessions),
+        "total_sessions": len(sessions),
         "rest_days": rest_count,
         "avg_load": avg_load,
         "avg_sleep": avg_sleep,

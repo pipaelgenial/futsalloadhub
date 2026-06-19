@@ -43,7 +43,7 @@ export default function AppShell({ children }) {
           <div className="flex-1 min-w-0">
             <TeamSwitcher />
           </div>
-          <NotificationsBell />
+          <NotificationsBell align="left" />
         </div>
 
         <nav className="flex-1 flex flex-col gap-1">

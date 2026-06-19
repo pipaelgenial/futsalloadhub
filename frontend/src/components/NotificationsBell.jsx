@@ -39,7 +39,7 @@ function severityStyle(s) {
   return { bg: "rgba(204,255,0,0.08)", border: "#CCFF00", text: "#CCFF00", dot: "bg-[#CCFF00]" };
 }
 
-export default function NotificationsBell({ testid = "notifications-bell" }) {
+export default function NotificationsBell({ testid = "notifications-bell", align = "right" }) {
   const [alerts, setAlerts] = useState([]);
   const [resolved, setResolved] = useState(loadResolved());
   const [seen, setSeen] = useState(loadSeen());
@@ -164,7 +164,7 @@ export default function NotificationsBell({ testid = "notifications-bell" }) {
       {open && (
         <div
           data-testid="notifications-dropdown"
-          className="absolute right-0 mt-2 w-[360px] max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)] max-h-[calc(100vh-5rem)] flex flex-col bg-[#0F0F0F] border border-white/10 z-50 shadow-2xl"
+          className={`absolute ${align === "left" ? "left-0" : "right-0"} mt-2 w-[360px] max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)] max-h-[calc(100vh-5rem)] flex flex-col bg-[#0F0F0F] border border-white/10 z-50 shadow-2xl`}
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
             <div>
