@@ -75,7 +75,22 @@ function hexToRgb(hex) {
 }
 
 function cellStyle(d, th) {
-  if (!d || !d.total_load) return { bg: "transparent", border: "rgba(255,255,255,0.05)" };
+  if (!d) return { bg: "transparent", border: "rgba(255,255,255,0.05)" };
+  // Rest / injury days have total_load === 0 but we still want to colour them
+  // so the user can see at a glance who's off / injured.
+  const hasInjury = d.session_types?.injury > 0;
+  const hasRest = d.session_types?.rest > 0;
+  if (!d.total_load) {
+    if (hasInjury) {
+      const { r, g, b } = hexToRgb(SESSION_TYPES.injury.color);
+      return { bg: `rgba(${r},${g},${b},0.22)`, border: `rgba(${r},${g},${b},0.55)` };
+    }
+    if (hasRest) {
+      const { r, g, b } = hexToRgb(SESSION_TYPES.rest.color);
+      return { bg: `rgba(${r},${g},${b},0.18)`, border: `rgba(${r},${g},${b},0.45)` };
+    }
+    return { bg: "transparent", border: "rgba(255,255,255,0.05)" };
+  }
   const type = dominantType(d);
   const meta = type ? SESSION_TYPES[type] : null;
   const baseColor = meta?.color || "#CCFF00";
