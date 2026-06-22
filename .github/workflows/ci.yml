@@ -35,13 +35,11 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: yarn
-          cache-dependency-path: frontend/yarn.lock
+          node-version: "24"
 
       - name: Install dependencies
         working-directory: frontend
-        run: yarn install --frozen-lockfile
+        run: yarn install
 
       - name: Lint frontend
         working-directory: frontend
