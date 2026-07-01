@@ -22,3 +22,5 @@ boto3==1.43.27
 stripe==14.4.1
 resend==2.32.2
 PyJWT==2.13.0
+email-validator==2.3.0
+bcrypt==4.1.3
