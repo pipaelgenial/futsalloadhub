@@ -1943,6 +1943,8 @@ async def calendar_view(start: str, days: int = 28, athlete_id: Optional[str] = 
                 "load": s["load"],
                 "session_type": s.get("session_type", "training"),
                 "session_id": s["id"],
+                "notes": s.get("notes"),
+                "created_by": s.get("created_by"),
             })
         # session type counts for day badge display
         type_counts = defaultdict(int)
@@ -2504,6 +2506,38 @@ async def admin_reactivate_user(user_id: str, admin=Depends(require_admin)):
         raise HTTPException(404, "Utilizador não encontrado")
     await db.users.update_one({"id": user_id}, {"$set": {"status": "active"}})
     return {"ok": True, "id": user_id, "status": "active"}
+
+
+@api.post("/admin/users/{user_id}/reset-password")
+async def admin_reset_password(user_id: str, admin=Depends(require_admin)):
+    """Generate a temporary password for a user and return it once.
+
+    Admin should share it with the user via a secure channel. The user should
+    change it after logging in.
+    """
+    target = await db.users.find_one({"id": user_id})
+    if not target:
+        raise HTTPException(404, "Utilizador não encontrado")
+    if target.get("role") == "admin":
+        raise HTTPException(400, "Não é possível gerar uma password temporária para um admin")
+    # 10-char alphanumeric (unambiguous), e.g. "K7m3P9nQ4x"
+    alphabet = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    temp_password = "".join(secrets.choice(alphabet) for _ in range(10))
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {
+            "password_hash": hash_password(temp_password),
+            "password_updated_at": datetime.now(timezone.utc).isoformat(),
+            "password_reset_by_admin": True,
+        }},
+    )
+    return {
+        "ok": True,
+        "id": user_id,
+        "email": target.get("email"),
+        "temp_password": temp_password,
+        "message": "Password temporária gerada. Partilhe com o utilizador de forma segura.",
+    }
 
 
 @api.delete("/admin/users/{user_id}")

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
-import { Check, RotateCcw, Trash2, ShieldCheck, ShieldAlert, Users, Search } from "lucide-react";
+import { Check, RotateCcw, Trash2, ShieldCheck, ShieldAlert, Users, Search, KeyRound, Copy } from "lucide-react";
 
 const STATUS_META = {
   pending: { label: "Pendente", color: "#FF9500", bg: "rgba(255,149,0,0.10)" },
@@ -21,6 +21,7 @@ export default function AdminPanel() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all"); // all | pending | active | suspended
   const [acting, setActing] = useState(null);
+  const [tempPassword, setTempPassword] = useState(null); // { email, password }
 
   async function load() {
     setLoading(true);
@@ -51,6 +52,27 @@ export default function AdminPanel() {
       load();
     } catch (err) { toast.error(formatApiError(err)); }
     finally { setActing(null); }
+  }
+
+  async function resetPassword(u) {
+    if (!window.confirm(`Gerar password temporária para "${u.email}"?\n\nO utilizador não conseguirá entrar com a password antiga e terá de usar a nova. Deve alterá-la após o próximo login.`)) return;
+    setActing(u.id);
+    try {
+      const { data } = await http.post(`/admin/users/${u.id}/reset-password`);
+      setTempPassword({ email: data.email, password: data.temp_password });
+      toast.success("Password temporária gerada");
+    } catch (err) { toast.error(formatApiError(err)); }
+    finally { setActing(null); }
+  }
+
+  async function copyTempPassword() {
+    if (!tempPassword) return;
+    try {
+      await navigator.clipboard.writeText(tempPassword.password);
+      toast.success("Password copiada");
+    } catch {
+      toast.error("Não foi possível copiar automaticamente");
+    }
   }
 
   const filtered = users.filter((u) => {
@@ -215,6 +237,17 @@ export default function AdminPanel() {
                   )}
                   {!isAdmin && (
                     <button
+                      onClick={() => resetPassword(u)}
+                      disabled={acting === u.id}
+                      data-testid={`reset-password-${u.id}`}
+                      title="Gerar password temporária"
+                      className="text-[10px] uppercase tracking-widest px-2.5 py-1.5 border border-[#FFEA00]/40 text-[#FFEA00] hover:bg-[#FFEA00]/10 transition-all flex items-center gap-1"
+                    >
+                      <KeyRound className="w-3 h-3" /> Reset Pass
+                    </button>
+                  )}
+                  {!isAdmin && (
+                    <button
                       onClick={() => removeUser(u)}
                       disabled={acting === u.id}
                       data-testid={`delete-user-${u.id}`}
@@ -232,6 +265,45 @@ export default function AdminPanel() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Temp password modal */}
+      {tempPassword && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" data-testid="temp-password-modal">
+          <div className="bg-[#0F0F0F] border border-[#FFEA00]/40 max-w-md w-full p-6">
+            <div className="flex items-center gap-2 mb-3">
+              <KeyRound className="w-5 h-5 text-[#FFEA00]" />
+              <h2 className="font-head text-lg font-extrabold uppercase tracking-widest">Password Temporária</h2>
+            </div>
+            <p className="text-sm text-[#A3A3A3] mb-4">
+              Gerada para <span className="text-white font-semibold">{tempPassword.email}</span>.
+              Copie e partilhe de forma segura com o utilizador. Esta password não será mostrada novamente.
+            </p>
+            <div className="flex items-center gap-2 mb-5">
+              <code className="flex-1 bg-black/60 border border-white/10 px-4 py-3 font-mono text-lg text-[#FFEA00] tracking-wider text-center break-all" data-testid="temp-password-value">
+                {tempPassword.password}
+              </code>
+              <button
+                onClick={copyTempPassword}
+                data-testid="copy-temp-password"
+                className="p-3 border border-[#CCFF00]/40 text-[#CCFF00] hover:bg-[#CCFF00]/10 transition-all"
+                title="Copiar"
+              >
+                <Copy className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="text-xs text-[#FFEA00]/80 bg-[#FFEA00]/5 border border-[#FFEA00]/20 p-3 mb-5">
+              ⚠️ Recomende ao utilizador alterar esta password após o próximo login.
+            </div>
+            <button
+              onClick={() => setTempPassword(null)}
+              data-testid="close-temp-password"
+              className="w-full py-2.5 bg-white text-black font-head text-xs uppercase tracking-widest hover:bg-[#CCFF00] transition-colors"
+            >
+              Fechar
+            </button>
+          </div>
         </div>
       )}
     </div>

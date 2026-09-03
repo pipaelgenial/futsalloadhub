@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { http, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, Pencil } from "lucide-react";
+import { Link } from "react-router-dom";
 import { SESSION_TYPES, SessionTypeBadge } from "@/components/Bits";
 
 const WEEKDAY_NAMES = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
@@ -414,6 +415,8 @@ export default function CalendarPage() {
                   <th className="py-2 px-2">RPE</th>
                   <th className="py-2 px-2">Duração</th>
                   <th className="py-2 px-2 text-[#CCFF00]">Carga</th>
+                  <th className="py-2 px-2">Notas</th>
+                  <th className="py-2 px-2 text-right">Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -424,9 +427,35 @@ export default function CalendarPage() {
                       {a.name}
                     </td>
                     <td className="py-2 px-2"><SessionTypeBadge type={a.session_type || "training"} size="sm" /></td>
-                    <td className="py-2 px-2 metric-num">{a.rpe}</td>
-                    <td className="py-2 px-2">{a.duration_min}min</td>
+                    <td className="py-2 px-2 metric-num">{a.rpe || <span className="text-[#525252]">—</span>}</td>
+                    <td className="py-2 px-2">{a.duration_min ? `${a.duration_min}min` : <span className="text-[#525252]">—</span>}</td>
                     <td className="py-2 px-2 metric-num text-[#CCFF00]">{a.load}</td>
+                    <td className="py-2 px-2 max-w-[220px]">
+                      {a.notes ? (
+                        <div className="flex items-start gap-1.5">
+                          {a.created_by === "player" && (
+                            <span title="Nota do jogador" className="shrink-0 mt-0.5 text-[9px] font-head font-extrabold px-1.5 py-0.5 bg-[#CCFF00]/15 text-[#CCFF00] uppercase tracking-widest">
+                              Atleta
+                            </span>
+                          )}
+                          <span className="text-xs text-[#D4D4D4] leading-snug break-words" title={a.notes}>
+                            {a.notes.length > 60 ? a.notes.slice(0, 60) + "…" : a.notes}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-[#525252]">—</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-2 text-right">
+                      <Link
+                        to={`/atletas/${a.athlete_id}`}
+                        data-testid={`cal-edit-session-${a.session_id}`}
+                        title="Ir para o atleta para editar esta sessão"
+                        className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-[#A3A3A3] hover:text-[#CCFF00] transition-colors"
+                      >
+                        <Pencil className="w-3 h-3" /> Editar
+                      </Link>
+                    </td>
                   </tr>
                 ))}
               </tbody>

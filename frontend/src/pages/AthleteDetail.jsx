@@ -223,6 +223,7 @@ export default function AthleteDetail() {
                   <th className="py-3 px-2">Sono</th>
                   <th className="py-3 px-2">Bem-Estar</th>
                   <th className="py-3 px-2 text-[#CCFF00]">Carga</th>
+                  <th className="py-3 px-2">Notas</th>
                   <th className="py-3 px-2 text-right">Ações</th>
                 </tr>
               </thead>
@@ -260,6 +261,9 @@ export default function AthleteDetail() {
                         </td>
                         <td className="py-2 px-2 metric-num text-[#CCFF00]">{computed}</td>
                         <td className="py-2 px-2">
+                          <input type="text" placeholder="Nota do treinador" className="fld-input py-1 px-2 text-sm w-full max-w-[220px]" value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} data-testid={`edit-notes-${s.id}`} />
+                        </td>
+                        <td className="py-2 px-2">
                           <div className="flex justify-end gap-2">
                             <button onClick={() => saveEdit(s.id)} disabled={saving} className="text-[#CCFF00] hover:text-white" data-testid={`save-session-${s.id}`} title="Guardar">
                               <Check className="w-4 h-4" />
@@ -281,6 +285,22 @@ export default function AthleteDetail() {
                       <td className="py-2 px-2">{isRest ? <span className="text-[#525252]">—</span> : `${sleep}/5`}</td>
                       <td className="py-2 px-2 metric-num">{isRest ? <span className="text-[#525252]">—</span> : (<>{wellness}<span className="text-[#525252] text-xs">/10</span></>)}</td>
                       <td className="py-2 px-2 metric-num text-[#CCFF00]">{isRest ? <span className="text-[#525252]">0</span> : s.load}</td>
+                      <td className="py-2 px-2 max-w-[240px]" data-testid={`notes-cell-${s.id}`}>
+                        {s.notes ? (
+                          <div className="flex items-start gap-1.5">
+                            {s.created_by === "player" && (
+                              <span title="Nota do jogador" className="shrink-0 mt-0.5 text-[9px] font-head font-extrabold px-1.5 py-0.5 bg-[#CCFF00]/15 text-[#CCFF00] uppercase tracking-widest">
+                                Atleta
+                              </span>
+                            )}
+                            <span className="text-xs text-[#D4D4D4] leading-snug break-words" title={s.notes}>
+                              {s.notes.length > 80 ? s.notes.slice(0, 80) + "…" : s.notes}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-[#525252]">—</span>
+                        )}
+                      </td>
                       <td className="py-2 px-2">
                         <div className="flex justify-end gap-2">
                           <button onClick={() => startEdit(s)} className="text-[#525252] hover:text-[#CCFF00]" data-testid={`edit-session-${s.id}`} title="Editar">
