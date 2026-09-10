@@ -222,7 +222,9 @@ export default function AthleteDetail() {
                   <th className="py-3 px-2">Duração</th>
                   <th className="py-3 px-2">Sono</th>
                   <th className="py-3 px-2">Bem-Estar</th>
-                  <th className="py-3 px-2 text-[#CCFF00]">Carga</th>
+                  <th className="py-3 px-2 text-[#CCFF00]">Carga Base</th>
+                  <th className="py-3 px-2 text-[#A3A3A3]" title="Multiplicador do tipo de sessão">×</th>
+                  <th className="py-3 px-2 text-[#CCFF00]">Carga Ajust.</th>
                   <th className="py-3 px-2">Notas</th>
                   <th className="py-3 px-2 text-right">Ações</th>
                 </tr>
@@ -260,6 +262,8 @@ export default function AthleteDetail() {
                           <input type="number" min="1" max="10" className="fld-input py-1 px-2 w-14 text-sm" value={editForm.wellness} onChange={(e) => setEditForm({ ...editForm, wellness: e.target.value })} data-testid={`edit-wellness-${s.id}`} />
                         </td>
                         <td className="py-2 px-2 metric-num text-[#CCFF00]">{computed}</td>
+                        <td className="py-2 px-2 text-[#525252] text-xs">—</td>
+                        <td className="py-2 px-2 text-[#525252] text-xs">—</td>
                         <td className="py-2 px-2">
                           <input type="text" placeholder="Nota do treinador" className="fld-input py-1 px-2 text-sm w-full max-w-[220px]" value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} data-testid={`edit-notes-${s.id}`} />
                         </td>
@@ -285,6 +289,12 @@ export default function AthleteDetail() {
                       <td className="py-2 px-2">{isRest ? <span className="text-[#525252]">—</span> : `${sleep}/5`}</td>
                       <td className="py-2 px-2 metric-num">{isRest ? <span className="text-[#525252]">—</span> : (<>{wellness}<span className="text-[#525252] text-xs">/10</span></>)}</td>
                       <td className="py-2 px-2 metric-num text-[#CCFF00]">{isRest ? <span className="text-[#525252]">0</span> : s.load}</td>
+                      <td className="py-2 px-2 metric-num text-[#A3A3A3] text-xs">
+                        {isRest ? <span className="text-[#525252]">—</span> : (s.session_multiplier != null ? `×${s.session_multiplier.toFixed(2)}` : "×1.00")}
+                      </td>
+                      <td className="py-2 px-2 metric-num text-[#CCFF00]" title="Carga ajustada = base × multiplicador (usada no EWMA)">
+                        {isRest ? <span className="text-[#525252]">0</span> : (s.load_adjusted != null ? Math.round(s.load_adjusted) : s.load)}
+                      </td>
                       <td className="py-2 px-2 max-w-[240px]" data-testid={`notes-cell-${s.id}`}>
                         {s.notes ? (
                           <div className="flex items-start gap-1.5">

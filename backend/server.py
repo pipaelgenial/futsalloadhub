@@ -199,6 +199,34 @@ class SessionUpdate(BaseModel):
 
 VALID_SESSION_TYPES = {"training", "match", "gym", "recovery", "rest", "injury"}
 
+# Session-type multipliers applied to the base load (rpe × duration) to obtain
+# the "adjusted load". Used in the EWMA ACWR calculation. RA (Gabbett classical)
+# keeps using the base load.
+SESSION_MULTIPLIERS = {
+    "training": 1.0,
+    "match": 1.2,
+    "gym": 1.0,
+    "recovery": 0.70,
+    "rest": 0.0,
+    "injury": 0.0,
+}
+
+
+def _multiplier(session_type: str) -> float:
+    return SESSION_MULTIPLIERS.get(session_type or "training", 1.0)
+
+
+def _load_adjusted(s: dict) -> float:
+    return float(s.get("load", 0)) * _multiplier(s.get("session_type", "training"))
+
+
+def _enrich_session(s: dict) -> dict:
+    """Attach session_multiplier and load_adjusted to a session dict (in-place & return)."""
+    mult = _multiplier(s.get("session_type", "training"))
+    s["session_multiplier"] = mult
+    s["load_adjusted"] = round(float(s.get("load", 0)) * mult, 1)
+    return s
+
 
 class RestDayIn(BaseModel):
     athlete_id: str
@@ -1089,13 +1117,15 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None,
     if ref_date is None:
         ref_date = date.today()
 
-    # group loads by day
-    by_day = defaultdict(float)
+    # group loads by day — build BOTH base (RA) and adjusted (EWMA) maps
+    by_day = defaultdict(float)          # base load = rpe × duration
+    by_day_adj = defaultdict(float)      # adjusted load = base × session_multiplier
     sleep_by_day = {}
     dates_set = []
     for s in sessions:
         d = _parse_date(s["date"])
         by_day[d] += s["load"]
+        by_day_adj[d] += _load_adjusted(s)
         sleep_by_day[d] = s["sleep_quality"]
         dates_set.append(d)
 
@@ -1121,9 +1151,10 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None,
 
     # acute + chronic — RA (rolling avg) or EWMA
     if method == "ewma":
-        acute, chronic = _ewma_acwr(by_day, ref_date)
+        # EWMA uses the ADJUSTED daily load (session-type multipliers applied)
+        acute, chronic = _ewma_acwr(by_day_adj, ref_date)
     else:
-        # RA: acute = sum of last 7d; chronic = avg of 4 weekly sums (28d)
+        # RA: acute = sum of last 7d; chronic = avg of 4 weekly sums (28d) — base load
         acute = sum(by_day.get(ref_date - timedelta(days=i), 0) for i in range(7))
         weekly_loads = []
         for w in range(4):
@@ -1324,14 +1355,18 @@ async def analytics_athlete(athlete_id: str, user=Depends(get_current_user)):
     # daily time series for ACWR chart (last 60 days)
     ref = date.today()
     by_day = defaultdict(float)
+    by_day_adj = defaultdict(float)
     for s in sessions:
-        by_day[_parse_date(s["date"])] += s["load"]
+        d = _parse_date(s["date"])
+        by_day[d] += s["load"]
+        by_day_adj[d] += _load_adjusted(s)
 
     series = []
     for i in range(59, -1, -1):
         d = ref - timedelta(days=i)
         if method == "ewma":
-            acute, chronic = _ewma_acwr(by_day, d)
+            acute, chronic = _ewma_acwr(by_day_adj, d)
+            load_shown = round(by_day_adj.get(d, 0), 1)
         else:
             acute = sum(by_day.get(d - timedelta(days=j), 0) for j in range(7))
             weekly = []
@@ -1339,16 +1374,17 @@ async def analytics_athlete(athlete_id: str, user=Depends(get_current_user)):
                 ws = sum(by_day.get(d - timedelta(days=j), 0) for j in range(w * 7, (w + 1) * 7))
                 weekly.append(ws)
             chronic = sum(weekly) / 4
+            load_shown = round(by_day.get(d, 0), 1)
         acwr = round(acute / chronic, 2) if chronic > 0 else 0
         series.append({
             "date": d.isoformat(),
-            "load": round(by_day.get(d, 0), 1),
+            "load": load_shown,
             "acute": round(acute, 1),
             "chronic": round(chronic, 1),
             "acwr": acwr,
         })
 
-    return {"athlete": athlete, "metrics": metrics, "series": series, "sessions": sessions, "acwr_method": method}
+    return {"athlete": athlete, "metrics": metrics, "series": series, "sessions": [_enrich_session(s) for s in sessions], "acwr_method": method}
 
 
 @api.get("/analytics/team")
@@ -1606,14 +1642,17 @@ async def compare_athletes(a1: str, a2: str, user=Depends(get_current_user)):
 
         ref = date.today()
         by_day = defaultdict(float)
+        by_day_adj = defaultdict(float)
         for s in sessions:
-            by_day[_parse_date(s["date"])] += s["load"]
+            d = _parse_date(s["date"])
+            by_day[d] += s["load"]
+            by_day_adj[d] += _load_adjusted(s)
 
         series = []
         for i in range(59, -1, -1):
             d = ref - timedelta(days=i)
             if method == "ewma":
-                acute, chronic = _ewma_acwr(by_day, d)
+                acute, chronic = _ewma_acwr(by_day_adj, d)
             else:
                 acute = sum(by_day.get(d - timedelta(days=j), 0) for j in range(7))
                 weekly = []
@@ -1988,6 +2027,7 @@ async def calendar_view(start: str, days: int = 28, athlete_id: Optional[str] = 
         athletes_trained = []
         for s in rec:
             a = a_map.get(s["athlete_id"], {})
+            mult = _multiplier(s.get("session_type", "training"))
             athletes_trained.append({
                 "athlete_id": s["athlete_id"],
                 "name": a.get("name", "—"),
@@ -1995,6 +2035,8 @@ async def calendar_view(start: str, days: int = 28, athlete_id: Optional[str] = 
                 "rpe": s["rpe"],
                 "duration_min": s["duration_min"],
                 "load": s["load"],
+                "session_multiplier": mult,
+                "load_adjusted": round(float(s.get("load", 0)) * mult, 1),
                 "session_type": s.get("session_type", "training"),
                 "session_id": s["id"],
                 "notes": s.get("notes"),
@@ -2108,20 +2150,26 @@ async def team_detailed(user=Depends(get_current_user)):
 
     n_athletes = len(athletes)
     by_day = defaultdict(float)
+    by_day_adj = defaultdict(float)
     for s in sessions:
-        by_day[_parse_date(s["date"])] += s["load"]
+        d = _parse_date(s["date"])
+        by_day[d] += s["load"]
+        by_day_adj[d] += _load_adjusted(s)
     # average per athlete (treat team as a "super athlete" with avg load)
     by_day_avg = {d: v / n_athletes for d, v in by_day.items()}
+    by_day_adj_avg = {d: v / n_athletes for d, v in by_day_adj.items()}
     method = team.get("acwr_method") or DEFAULT_ACWR_METHOD
 
-    metrics = _team_metrics_from_daily(by_day_avg, method=method)
+    # team metrics are computed from the map that matches the method
+    metrics = _team_metrics_from_daily(by_day_adj_avg if method == "ewma" else by_day_avg, method=method)
 
     ref = date.today()
     series = []
     for i in range(59, -1, -1):
         d = ref - timedelta(days=i)
         if method == "ewma":
-            acute, chronic = _ewma_acwr(by_day_avg, d)
+            acute, chronic = _ewma_acwr(by_day_adj_avg, d)
+            load_shown = round(by_day_adj_avg.get(d, 0), 1)
         else:
             acute = sum(by_day_avg.get(d - timedelta(days=j), 0) for j in range(7))
             weekly = [
@@ -2129,10 +2177,11 @@ async def team_detailed(user=Depends(get_current_user)):
                 for w in range(4)
             ]
             chronic = sum(weekly) / 4
+            load_shown = round(by_day_avg.get(d, 0), 1)
         acwr = round(acute / chronic, 2) if chronic > 0 else 0
         series.append({
             "date": d.isoformat(),
-            "load": round(by_day_avg.get(d, 0), 1),
+            "load": load_shown,
             "acute": round(acute, 1),
             "chronic": round(chronic, 1),
             "acwr": acwr,

@@ -414,7 +414,9 @@ export default function CalendarPage() {
                   <th className="py-2 px-2">Tipo</th>
                   <th className="py-2 px-2">RPE</th>
                   <th className="py-2 px-2">Duração</th>
-                  <th className="py-2 px-2 text-[#CCFF00]">Carga</th>
+                  <th className="py-2 px-2 text-[#CCFF00]">Base</th>
+                  <th className="py-2 px-2 text-[#A3A3A3]">×</th>
+                  <th className="py-2 px-2 text-[#CCFF00]">Ajust.</th>
                   <th className="py-2 px-2">Notas</th>
                   <th className="py-2 px-2 text-right">Ações</th>
                 </tr>
@@ -430,6 +432,12 @@ export default function CalendarPage() {
                     <td className="py-2 px-2 metric-num">{a.rpe || <span className="text-[#525252]">—</span>}</td>
                     <td className="py-2 px-2">{a.duration_min ? `${a.duration_min}min` : <span className="text-[#525252]">—</span>}</td>
                     <td className="py-2 px-2 metric-num text-[#CCFF00]">{a.load}</td>
+                    <td className="py-2 px-2 metric-num text-[#A3A3A3] text-xs">
+                      {a.session_multiplier != null ? `×${a.session_multiplier.toFixed(2)}` : "×1.00"}
+                    </td>
+                    <td className="py-2 px-2 metric-num text-[#CCFF00]" title="Carga ajustada = base × multiplicador">
+                      {a.load_adjusted != null ? Math.round(a.load_adjusted) : a.load}
+                    </td>
                     <td className="py-2 px-2 max-w-[220px]">
                       {a.notes ? (
                         <div className="flex items-start gap-1.5">
