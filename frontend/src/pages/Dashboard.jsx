@@ -172,7 +172,18 @@ export default function Dashboard() {
             <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
               <div>
                 <div className="fld-label">Vista Detalhada</div>
-                <div className="font-head text-2xl font-bold">ACWR — {detailLabel || "Equipa"}</div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="font-head text-2xl font-bold">ACWR — {detailLabel || "Equipa"}</div>
+                  {detailMetrics?.acwr_method && (
+                    <span
+                      title={detailMetrics.acwr_method === "ewma" ? "Exponentially Weighted Moving Average (Williams 2016) — mais peso aos dias recentes" : "Rolling Average 1:4 (Gabbett) — pesos iguais nos últimos 7/28 dias"}
+                      className="text-[10px] font-head font-extrabold uppercase tracking-widest px-2 py-1 border border-[#CCFF00]/40 text-[#CCFF00] bg-[#CCFF00]/5"
+                      data-testid="acwr-method-badge"
+                    >
+                      {detailMetrics.acwr_method === "ewma" ? "EWMA" : "RA 1:4"}
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="flex items-center gap-3 flex-wrap">
                 <select
