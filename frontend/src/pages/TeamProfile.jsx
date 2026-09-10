@@ -21,7 +21,7 @@ export default function TeamProfile() {
   const [teams, setTeams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null); // id or "new"
-  const [form, setForm] = useState({ name: "", escalao: "", epoca: "", load_thresholds: { ...DEFAULT_THRESHOLDS } });
+  const [form, setForm] = useState({ name: "", escalao: "", epoca: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra" });
   const [saving, setSaving] = useState(false);
 
   async function load() {
@@ -40,7 +40,7 @@ export default function TeamProfile() {
       return;
     }
     setEditing("new");
-    setForm({ name: "", escalao: "", epoca: "", load_thresholds: { ...DEFAULT_THRESHOLDS } });
+    setForm({ name: "", escalao: "", epoca: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra" });
   }
 
   function startEdit(t) {
@@ -50,12 +50,13 @@ export default function TeamProfile() {
       escalao: t.escalao,
       epoca: t.epoca,
       load_thresholds: t.load_thresholds || { ...DEFAULT_THRESHOLDS },
+      acwr_method: t.acwr_method || "ra",
     });
   }
 
   function cancel() {
     setEditing(null);
-    setForm({ name: "", escalao: "", epoca: "", load_thresholds: { ...DEFAULT_THRESHOLDS } });
+    setForm({ name: "", escalao: "", epoca: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra" });
   }
 
   function setThreshold(key, value) {
@@ -91,6 +92,7 @@ export default function TeamProfile() {
         name: form.name,
         escalao: form.escalao,
         epoca: form.epoca,
+        acwr_method: form.acwr_method || "ra",
         load_thresholds: {
           ideal: Number(form.load_thresholds.ideal),
           moderate: Number(form.load_thresholds.moderate),
@@ -164,6 +166,43 @@ export default function TeamProfile() {
             <div>
               <label className="fld-label">Época</label>
               <input className="fld-input" value={form.epoca} onChange={(e) => setForm({ ...form, epoca: e.target.value })} required data-testid="team-epoca" placeholder="Ex: 2025/2026" />
+            </div>
+          </div>
+
+          {/* ACWR calculation method */}
+          <div className="border-t border-white/5 pt-5">
+            <div className="font-head text-sm uppercase tracking-widest mb-1">Método de Cálculo do ACWR</div>
+            <p className="text-[10px] text-[#525252] mb-3">
+              <b>RA</b> — Rolling Average 1:4 (soma 7d / média de 4×7d). Método clássico de Gabbett.<br />
+              <b>EWMA</b> — Exponentially Weighted Moving Average (Williams et al. 2016). Dá mais peso aos dias recentes; menos sensível a falsos alarmes.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, acwr_method: "ra" }))}
+                data-testid="acwr-method-ra"
+                className={`py-3 px-4 border text-left transition-all ${
+                  form.acwr_method === "ra"
+                    ? "border-[#CCFF00] bg-[#CCFF00]/10 text-[#CCFF00]"
+                    : "border-white/10 hover:border-white/30 text-[#A3A3A3]"
+                }`}
+              >
+                <div className="font-head text-xs uppercase tracking-widest">Rolling Average</div>
+                <div className="text-[10px] mt-1 opacity-70">1:4 · Soma 7d / Média 4×7d</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, acwr_method: "ewma" }))}
+                data-testid="acwr-method-ewma"
+                className={`py-3 px-4 border text-left transition-all ${
+                  form.acwr_method === "ewma"
+                    ? "border-[#CCFF00] bg-[#CCFF00]/10 text-[#CCFF00]"
+                    : "border-white/10 hover:border-white/30 text-[#A3A3A3]"
+                }`}
+              >
+                <div className="font-head text-xs uppercase tracking-widest">EWMA</div>
+                <div className="text-[10px] mt-1 opacity-70">λ=0.25 / λ=0.069 · pesos exp. decrescentes</div>
+              </button>
             </div>
           </div>
 
@@ -279,6 +318,9 @@ export default function TeamProfile() {
                 <div className="font-head text-lg font-bold truncate">{t.name}</div>
                 <div className="text-xs text-[#A3A3A3] uppercase tracking-widest">{t.escalao}</div>
                 <div className="text-xs text-[#525252] mt-0.5">{t.epoca}</div>
+                <div className="mt-1.5 inline-block text-[9px] font-head font-extrabold uppercase tracking-widest px-1.5 py-0.5 border border-white/10 text-[#A3A3A3]" title="Método de cálculo do ACWR">
+                  ACWR: {(t.acwr_method || "ra").toUpperCase()}
+                </div>
               </div>
               {t.active && (
                 <span className="text-[10px] uppercase tracking-widest text-[#CCFF00] border border-[#CCFF00]/40 bg-[#CCFF00]/10 px-2 py-0.5" data-testid={`team-active-${t.id}`}>

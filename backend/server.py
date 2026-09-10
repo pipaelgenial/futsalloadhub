@@ -147,9 +147,12 @@ class TeamIn(BaseModel):
     escalao: str
     epoca: str
     load_thresholds: Optional[dict] = None  # {ideal, moderate, high, very_high} per-athlete UA
+    acwr_method: Optional[str] = None  # "ra" (rolling avg 1:4) or "ewma"
 
 
 DEFAULT_LOAD_THRESHOLDS = {"ideal": 300, "moderate": 600, "high": 900, "very_high": 1200}
+DEFAULT_ACWR_METHOD = "ra"
+VALID_ACWR_METHODS = {"ra", "ewma"}
 
 
 def _sanitize_thresholds(raw):
@@ -467,6 +470,8 @@ async def get_team(user=Depends(get_current_user)):
         team.pop("_id", None)
         if not team.get("load_thresholds"):
             team["load_thresholds"] = DEFAULT_LOAD_THRESHOLDS
+        if not team.get("acwr_method"):
+            team["acwr_method"] = DEFAULT_ACWR_METHOD
     return team
 
 
@@ -508,6 +513,8 @@ async def list_teams(user=Depends(get_current_user)):
         t["active"] = (t["id"] == active_id)
         if not t.get("load_thresholds"):
             t["load_thresholds"] = DEFAULT_LOAD_THRESHOLDS
+        if not t.get("acwr_method"):
+            t["acwr_method"] = DEFAULT_ACWR_METHOD
     return teams
 
 
@@ -533,6 +540,7 @@ async def create_team(data: TeamIn, user=Depends(get_current_user)):
         "escalao": data.escalao,
         "epoca": data.epoca,
         "load_thresholds": thresholds,
+        "acwr_method": data.acwr_method if data.acwr_method in VALID_ACWR_METHODS else DEFAULT_ACWR_METHOD,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.teams.insert_one(doc)
@@ -553,10 +561,16 @@ async def update_team_by_id(team_id: str, data: TeamIn, user=Depends(get_current
         if not thresholds:
             raise HTTPException(400, "Limiares inválidos — devem ser inteiros positivos crescentes")
         update_fields["load_thresholds"] = thresholds
+    if data.acwr_method is not None:
+        if data.acwr_method not in VALID_ACWR_METHODS:
+            raise HTTPException(400, "Método ACWR inválido (use 'ra' ou 'ewma')")
+        update_fields["acwr_method"] = data.acwr_method
     await db.teams.update_one({"id": team_id}, {"$set": update_fields})
     refreshed = await db.teams.find_one({"id": team_id}, {"_id": 0})
     if refreshed and not refreshed.get("load_thresholds"):
         refreshed["load_thresholds"] = DEFAULT_LOAD_THRESHOLDS
+    if refreshed and not refreshed.get("acwr_method"):
+        refreshed["acwr_method"] = DEFAULT_ACWR_METHOD
     return refreshed
 
 
@@ -1044,8 +1058,34 @@ def _aggregate_period(sessions_in_period: list) -> dict:
     }
 
 
-def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None) -> dict:
-    """Compute ACWR, acute, chronic, monotony, strain, risk for one athlete."""
+def _ewma_acwr(by_day: dict, ref_date: date) -> tuple:
+    """Exponentially Weighted Moving Average ACWR (Williams et al. 2016).
+
+    λ_acute   = 2/(7+1)  = 0.25   → half-life ~7d
+    λ_chronic = 2/(28+1) ≈ 0.069  → half-life ~28d
+
+    We use the last 28 days of daily loads (chronological, oldest → newest).
+    Missing days = 0. Initial EWMA seed = first day's load.
+    Returns (acute_ewma, chronic_ewma).
+    """
+    lam_a = 2.0 / (7.0 + 1.0)
+    lam_c = 2.0 / (28.0 + 1.0)
+    # 28 days chronological order (oldest to newest)
+    loads = [by_day.get(ref_date - timedelta(days=27 - i), 0.0) for i in range(28)]
+    ewma_a = loads[0]
+    ewma_c = loads[0]
+    for x in loads[1:]:
+        ewma_a = x * lam_a + ewma_a * (1 - lam_a)
+        ewma_c = x * lam_c + ewma_c * (1 - lam_c)
+    return ewma_a, ewma_c
+
+
+def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None,
+                                method: str = DEFAULT_ACWR_METHOD) -> dict:
+    """Compute ACWR, acute, chronic, monotony, strain, risk for one athlete.
+
+    method: 'ra' (rolling average 1:4) or 'ewma' (exponentially weighted).
+    """
     if ref_date is None:
         ref_date = date.today()
 
@@ -1079,14 +1119,17 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None)
     first_date = min(dates_set)
     days_since_first = (ref_date - first_date).days
 
-    # acute: last 7 days
-    acute = sum(by_day.get(ref_date - timedelta(days=i), 0) for i in range(7))
-    # chronic: avg of weekly loads over last 28 days (4 weeks)
-    weekly_loads = []
-    for w in range(4):
-        s = sum(by_day.get(ref_date - timedelta(days=i), 0) for i in range(w * 7, (w + 1) * 7))
-        weekly_loads.append(s)
-    chronic = sum(weekly_loads) / 4 if weekly_loads else 0
+    # acute + chronic — RA (rolling avg) or EWMA
+    if method == "ewma":
+        acute, chronic = _ewma_acwr(by_day, ref_date)
+    else:
+        # RA: acute = sum of last 7d; chronic = avg of 4 weekly sums (28d)
+        acute = sum(by_day.get(ref_date - timedelta(days=i), 0) for i in range(7))
+        weekly_loads = []
+        for w in range(4):
+            s = sum(by_day.get(ref_date - timedelta(days=i), 0) for i in range(w * 7, (w + 1) * 7))
+            weekly_loads.append(s)
+        chronic = sum(weekly_loads) / 4 if weekly_loads else 0
 
     acwr = round(acute / chronic, 2) if chronic > 0 else 0
 
@@ -1274,7 +1317,9 @@ async def analytics_athlete(athlete_id: str, user=Depends(get_current_user)):
     if not athlete:
         raise HTTPException(404, "Atleta não encontrado")
     sessions = await db.sessions.find({"athlete_id": athlete_id}, {"_id": 0}).to_list(5000)
-    metrics = compute_metrics_for_athlete(sessions)
+    method = team.get("acwr_method") or DEFAULT_ACWR_METHOD
+    metrics = compute_metrics_for_athlete(sessions, method=method)
+    metrics["acwr_method"] = method
 
     # daily time series for ACWR chart (last 60 days)
     ref = date.today()
@@ -1285,12 +1330,15 @@ async def analytics_athlete(athlete_id: str, user=Depends(get_current_user)):
     series = []
     for i in range(59, -1, -1):
         d = ref - timedelta(days=i)
-        acute = sum(by_day.get(d - timedelta(days=j), 0) for j in range(7))
-        weekly = []
-        for w in range(4):
-            ws = sum(by_day.get(d - timedelta(days=j), 0) for j in range(w * 7, (w + 1) * 7))
-            weekly.append(ws)
-        chronic = sum(weekly) / 4
+        if method == "ewma":
+            acute, chronic = _ewma_acwr(by_day, d)
+        else:
+            acute = sum(by_day.get(d - timedelta(days=j), 0) for j in range(7))
+            weekly = []
+            for w in range(4):
+                ws = sum(by_day.get(d - timedelta(days=j), 0) for j in range(w * 7, (w + 1) * 7))
+                weekly.append(ws)
+            chronic = sum(weekly) / 4
         acwr = round(acute / chronic, 2) if chronic > 0 else 0
         series.append({
             "date": d.isoformat(),
@@ -1300,7 +1348,7 @@ async def analytics_athlete(athlete_id: str, user=Depends(get_current_user)):
             "acwr": acwr,
         })
 
-    return {"athlete": athlete, "metrics": metrics, "series": series, "sessions": sessions}
+    return {"athlete": athlete, "metrics": metrics, "series": series, "sessions": sessions, "acwr_method": method}
 
 
 @api.get("/analytics/team")
@@ -1321,9 +1369,10 @@ async def analytics_team(user=Depends(get_current_user)):
     wellness_count = 0
     counted = 0
     risk_counts = {"safe": 0, "warning": 0, "danger": 0, "insufficient": 0, "low": 0, "no_data": 0}
+    method = team.get("acwr_method") or DEFAULT_ACWR_METHOD
     for a in athletes:
         sessions = await db.sessions.find({"athlete_id": a["id"]}, {"_id": 0}).to_list(5000)
-        m = compute_metrics_for_athlete(sessions)
+        m = compute_metrics_for_athlete(sessions, method=method)
         out_athletes.append({**a, "metrics": m})
         risk_counts[m["risk"]] = risk_counts.get(m["risk"], 0) + 1
         if m["sufficient_data"]:
@@ -1546,13 +1595,14 @@ async def monthly_summary(athlete_id: str, months: int = 6, user=Depends(get_cur
 @api.get("/analytics/compare")
 async def compare_athletes(a1: str, a2: str, user=Depends(get_current_user)):
     team = await _get_team_or_404(user)
+    method = team.get("acwr_method") or DEFAULT_ACWR_METHOD
     out = []
     for aid in (a1, a2):
         athlete = await db.athletes.find_one({"id": aid, "team_id": team["id"]}, {"_id": 0})
         if not athlete:
             raise HTTPException(404, f"Atleta {aid} não encontrado")
         sessions = await db.sessions.find({"athlete_id": aid}, {"_id": 0}).to_list(5000)
-        metrics = compute_metrics_for_athlete(sessions)
+        metrics = compute_metrics_for_athlete(sessions, method=method)
 
         ref = date.today()
         by_day = defaultdict(float)
@@ -1562,12 +1612,15 @@ async def compare_athletes(a1: str, a2: str, user=Depends(get_current_user)):
         series = []
         for i in range(59, -1, -1):
             d = ref - timedelta(days=i)
-            acute = sum(by_day.get(d - timedelta(days=j), 0) for j in range(7))
-            weekly = []
-            for w in range(4):
-                ws = sum(by_day.get(d - timedelta(days=j), 0) for j in range(w * 7, (w + 1) * 7))
-                weekly.append(ws)
-            chronic = sum(weekly) / 4
+            if method == "ewma":
+                acute, chronic = _ewma_acwr(by_day, d)
+            else:
+                acute = sum(by_day.get(d - timedelta(days=j), 0) for j in range(7))
+                weekly = []
+                for w in range(4):
+                    ws = sum(by_day.get(d - timedelta(days=j), 0) for j in range(w * 7, (w + 1) * 7))
+                    weekly.append(ws)
+                chronic = sum(weekly) / 4
             acwr = round(acute / chronic, 2) if chronic > 0 else 0
             series.append({"date": d.isoformat(), "acute": round(acute, 1), "chronic": round(chronic, 1), "acwr": acwr})
 
@@ -1726,10 +1779,11 @@ async def get_alerts(user=Depends(get_current_user)):
 
     alerts: list[dict] = []
     now_iso = datetime.now(timezone.utc).isoformat()
+    method = team.get("acwr_method") or DEFAULT_ACWR_METHOD
 
     for a in athletes:
         sessions = await db.sessions.find({"athlete_id": a["id"]}, {"_id": 0}).to_list(5000)
-        m = compute_metrics_for_athlete(sessions)
+        m = compute_metrics_for_athlete(sessions, method=method)
         last = max(sessions, key=lambda s: s["date"]) if sessions else None
         ath_name = a["name"]
 
@@ -1970,8 +2024,12 @@ async def calendar_view(start: str, days: int = 28, athlete_id: Optional[str] = 
 
 
 # ---------------------- Team-wide analytics ----------------------
-def _team_metrics_from_daily(by_day: dict, ref_date: Optional[date] = None) -> dict:
-    """Compute team-wide ACWR/monotony/strain from a {date: total_load} mapping."""
+def _team_metrics_from_daily(by_day: dict, ref_date: Optional[date] = None,
+                             method: str = DEFAULT_ACWR_METHOD) -> dict:
+    """Compute team-wide ACWR/monotony/strain from a {date: total_load} mapping.
+
+    method: 'ra' (rolling avg 1:4) or 'ewma'.
+    """
     if ref_date is None:
         ref_date = date.today()
     if not by_day:
@@ -1979,15 +2037,19 @@ def _team_metrics_from_daily(by_day: dict, ref_date: Optional[date] = None) -> d
             "acute": 0, "chronic": 0, "acwr": 0, "monotony": 0, "strain": 0,
             "sufficient_data": False, "days_since_first": 0,
             "acwr_zone": "no_data", "monotony_zone": "no_data", "strain_zone": "no_data",
+            "acwr_method": method,
         }
     first_date = min(by_day.keys())
     days_since_first = (ref_date - first_date).days
-    acute = sum(by_day.get(ref_date - timedelta(days=i), 0) for i in range(7))
-    weekly_loads = [
-        sum(by_day.get(ref_date - timedelta(days=i), 0) for i in range(w * 7, (w + 1) * 7))
-        for w in range(4)
-    ]
-    chronic = sum(weekly_loads) / 4 if weekly_loads else 0
+    if method == "ewma":
+        acute, chronic = _ewma_acwr(by_day, ref_date)
+    else:
+        acute = sum(by_day.get(ref_date - timedelta(days=i), 0) for i in range(7))
+        weekly_loads = [
+            sum(by_day.get(ref_date - timedelta(days=i), 0) for i in range(w * 7, (w + 1) * 7))
+            for w in range(4)
+        ]
+        chronic = sum(weekly_loads) / 4 if weekly_loads else 0
     acwr = round(acute / chronic, 2) if chronic > 0 else 0
     week_loads = [by_day.get(ref_date - timedelta(days=i), 0) for i in range(7)]
     mean_l = sum(week_loads) / 7
@@ -2026,6 +2088,7 @@ def _team_metrics_from_daily(by_day: dict, ref_date: Optional[date] = None) -> d
         "acwr_zone": acwr_zone,
         "monotony_zone": mono_zone,
         "strain_zone": strain_zone,
+        "acwr_method": method,
     }
 
 
@@ -2049,19 +2112,23 @@ async def team_detailed(user=Depends(get_current_user)):
         by_day[_parse_date(s["date"])] += s["load"]
     # average per athlete (treat team as a "super athlete" with avg load)
     by_day_avg = {d: v / n_athletes for d, v in by_day.items()}
+    method = team.get("acwr_method") or DEFAULT_ACWR_METHOD
 
-    metrics = _team_metrics_from_daily(by_day_avg)
+    metrics = _team_metrics_from_daily(by_day_avg, method=method)
 
     ref = date.today()
     series = []
     for i in range(59, -1, -1):
         d = ref - timedelta(days=i)
-        acute = sum(by_day_avg.get(d - timedelta(days=j), 0) for j in range(7))
-        weekly = [
-            sum(by_day_avg.get(d - timedelta(days=j), 0) for j in range(w * 7, (w + 1) * 7))
-            for w in range(4)
-        ]
-        chronic = sum(weekly) / 4
+        if method == "ewma":
+            acute, chronic = _ewma_acwr(by_day_avg, d)
+        else:
+            acute = sum(by_day_avg.get(d - timedelta(days=j), 0) for j in range(7))
+            weekly = [
+                sum(by_day_avg.get(d - timedelta(days=j), 0) for j in range(w * 7, (w + 1) * 7))
+                for w in range(4)
+            ]
+            chronic = sum(weekly) / 4
         acwr = round(acute / chronic, 2) if chronic > 0 else 0
         series.append({
             "date": d.isoformat(),
@@ -2071,7 +2138,7 @@ async def team_detailed(user=Depends(get_current_user)):
             "acwr": acwr,
         })
 
-    return {"team": team, "metrics": metrics, "series": series, "n_athletes": n_athletes}
+    return {"team": team, "metrics": metrics, "series": series, "n_athletes": n_athletes, "acwr_method": method}
 
 
 @api.get("/analytics/weekly/team/overview")
