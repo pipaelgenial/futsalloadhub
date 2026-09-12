@@ -49,11 +49,7 @@ export default function Dashboard() {
           setDetailSeries(data.series || []);
           setDetailMetrics(data.metrics);
           setInjuredCount(data.injured_count || 0);
-          const excl = data.excluded_injured || 0;
-          const label = data.exclude_injured && excl
-            ? `${data.team.name} (Equipa — ${excl} lesionado${excl > 1 ? "s" : ""} excluído${excl > 1 ? "s" : ""})`
-            : `${data.team.name} (Equipa)`;
-          setDetailLabel(label);
+          setDetailLabel(`${data.team.name} (Equipa)`);
         } else {
           setDetailSeries([]);
           setDetailMetrics(null);
@@ -69,8 +65,8 @@ export default function Dashboard() {
 
   useEffect(() => { load(); }, []);
   useEffect(() => {
-    if (data?.team && data.athletes.length > 0) loadDetail(selectedDetail);
-  }, [data?.team?.id, selectedDetail]);
+    if (data?.team && data.athletes.length > 0) loadDetail(selectedDetail, excludeInjured);
+  }, [data?.team?.id, selectedDetail, excludeInjured]);
 
   async function seedDemo() {
     setSeeding(true);
@@ -214,7 +210,7 @@ export default function Dashboard() {
                     <input
                       type="checkbox"
                       checked={excludeInjured}
-                      onChange={(e) => { setExcludeInjured(e.target.checked); loadDetail(TEAM_SELECTION, e.target.checked); }}
+                      onChange={(e) => setExcludeInjured(e.target.checked)}
                       data-testid="exclude-injured-checkbox"
                       className="w-4 h-4 accent-[#CCFF00]"
                     />
