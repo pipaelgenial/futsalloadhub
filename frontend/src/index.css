@@ -35,26 +35,77 @@ html.light {
 }
 
 /* Light theme — override the most common hardcoded arbitrary tailwind classes */
-html.light .bg-\[\#0A0A0A\], html.light .bg-\[\#0F0F0F\] { background-color: #FAFAFA !important; }
-html.light .bg-\[\#141414\], html.light .bg-\[\#1A1A1A\], html.light .bg-\[\#171717\] { background-color: #FFFFFF !important; }
+html.light body { background: #FAFAFA; color: #171717; }
+
+/* Backgrounds — solid dark greys → white / very light grey */
+html.light .bg-\[\#0A0A0A\],
+html.light .bg-\[\#0F0F0F\],
+html.light .bg-\[\#171717\] { background-color: #FFFFFF !important; }
+html.light .bg-\[\#141414\],
+html.light .bg-\[\#1A1A1A\],
+html.light .bg-\[\#262626\] { background-color: #F5F5F5 !important; }
+html.light .bg-black,
+html.light .bg-black\/60,
+html.light .bg-black\/80 { background-color: rgba(0,0,0,0.35) !important; }
+
+/* Sidebar special-case — subtle off-white */
+html.light aside { background-color: #F0F0F0 !important; border-right: 1px solid rgba(0,0,0,0.08); }
+html.light aside .bg-\[\#0A0A0A\],
+html.light aside .bg-\[\#0F0F0F\],
+html.light aside .bg-\[\#141414\] { background-color: transparent !important; }
+
+/* Text colours */
 html.light .text-white { color: #171717 !important; }
 html.light .text-\[\#A3A3A3\] { color: #525252 !important; }
+html.light .text-\[\#D4D4D4\],
+html.light .text-\[\#E5E5E5\] { color: #262626 !important; }
 html.light .text-\[\#525252\] { color: #737373 !important; }
-html.light .text-\[\#737373\] { color: #A3A3A3 !important; }
-html.light .text-\[\#D4D4D4\], html.light .text-\[\#E5E5E5\] { color: #262626 !important; }
+html.light .text-\[\#737373\] { color: #737373 !important; }
+html.light .text-black { color: #FFFFFF !important; }   /* used inside lime pills */
+
+/* Borders */
 html.light .border-white\/5 { border-color: rgba(0,0,0,0.06) !important; }
 html.light .border-white\/10 { border-color: rgba(0,0,0,0.10) !important; }
 html.light .border-white\/20 { border-color: rgba(0,0,0,0.20) !important; }
 html.light .border-white\/30 { border-color: rgba(0,0,0,0.30) !important; }
-html.light .bg-white\/\[0\.02\], html.light .bg-white\/5, html.light .bg-white\/10 { background-color: rgba(0,0,0,0.04) !important; }
-html.light .hover\:bg-white\/5:hover, html.light .hover\:bg-white\/10:hover { background-color: rgba(0,0,0,0.06) !important; }
-/* Keep the lime accent slightly darker in light for legibility */
-html.light .text-\[\#CCFF00\] { color: #6BA300 !important; }
-html.light .bg-\[\#CCFF00\] { background-color: #7BB800 !important; }
-html.light .bg-\[\#CCFF00\] .text-black { color: #FFFFFF !important; }
-html.light .border-\[\#CCFF00\]\/40 { border-color: rgba(107,163,0,0.5) !important; }
-html.light .border-\[\#CCFF00\]\/60 { border-color: rgba(107,163,0,0.7) !important; }
-html.light .bg-\[\#CCFF00\]\/10, html.light .bg-\[\#CCFF00\]\/15 { background-color: rgba(123,184,0,0.14) !important; }
+
+/* White overlays used as hover backgrounds */
+html.light .bg-white\/\[0\.02\],
+html.light .bg-white\/5,
+html.light .bg-white\/10 { background-color: rgba(0,0,0,0.04) !important; }
+html.light .hover\:bg-white\/5:hover,
+html.light .hover\:bg-white\/10:hover { background-color: rgba(0,0,0,0.06) !important; }
+
+/* Lime accent — darken so it reads on white */
+html.light .text-\[\#CCFF00\] { color: #4D8500 !important; }
+html.light .bg-\[\#CCFF00\] { background-color: #6BA300 !important; }
+html.light .bg-\[\#CCFF00\] .text-black,
+html.light .bg-\[\#CCFF00\] * { color: #FFFFFF !important; }
+html.light .border-\[\#CCFF00\],
+html.light .border-\[\#CCFF00\]\/40,
+html.light .border-\[\#CCFF00\]\/60 { border-color: #6BA300 !important; }
+html.light .bg-\[\#CCFF00\]\/5,
+html.light .bg-\[\#CCFF00\]\/10,
+html.light .bg-\[\#CCFF00\]\/15 { background-color: rgba(107,163,0,0.14) !important; }
+
+/* Yellow warning — deeper on white */
+html.light .text-\[\#FFEA00\] { color: #A16207 !important; }
+html.light .border-\[\#FFEA00\]\/40 { border-color: rgba(161,98,7,0.5) !important; }
+html.light .bg-\[\#FFEA00\]\/5,
+html.light .bg-\[\#FFEA00\]\/10 { background-color: rgba(161,98,7,0.12) !important; }
+
+/* Red danger — slightly darker */
+html.light .text-\[\#FF3B30\] { color: #B91C1C !important; }
+html.light .border-\[\#FF3B30\]\/40 { border-color: rgba(185,28,28,0.5) !important; }
+html.light .bg-\[\#FF3B30\]\/5,
+html.light .bg-\[\#FF3B30\]\/10 { background-color: rgba(185,28,28,0.12) !important; }
+
+/* Blue recovery */
+html.light .text-\[\#00B0FF\] { color: #0369A1 !important; }
+/* Purple injury */
+html.light .text-\[\#A855F7\] { color: #6D28D9 !important; }
+html.light .border-\[\#A855F7\]\/60 { border-color: rgba(109,40,217,0.7) !important; }
+html.light .bg-\[\#A855F7\]\/10 { background-color: rgba(109,40,217,0.12) !important; }
 
 html, body {
     margin: 0;
