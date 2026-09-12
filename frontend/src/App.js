@@ -1,6 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
-import { ThemeProvider } from "@/context/ThemeContext";
 import { Toaster } from "sonner";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
@@ -72,9 +71,8 @@ function PublicOnly({ children }) {
 export default function App() {
   return (
     <BrowserRouter>
-      <ThemeProvider>
-        <AuthProvider>
-          <Toaster position="top-right" />
+      <AuthProvider>
+        <Toaster theme="dark" position="top-right" />
         <Routes>
           {/* Public */}
           <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
@@ -104,8 +102,7 @@ export default function App() {
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-        </AuthProvider>
-      </ThemeProvider>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

@@ -3,7 +3,6 @@ import { useAuth } from "@/context/AuthContext";
 import { useEffect, useState } from "react";
 import { http } from "@/lib/api";
 import { Activity, LogOut, ClipboardEdit, History, User } from "lucide-react";
-import ThemeToggle from "@/components/ThemeToggle";
 
 const PLAYER_ITEMS = [
   { to: "/atleta", label: "RESUMO", icon: User, end: true },
@@ -41,16 +40,13 @@ export default function PlayerShell({ children }) {
               </div>
             </div>
           </button>
-          <div className="flex items-center gap-2 shrink-0">
-            <ThemeToggle />
-            <button
-              onClick={async () => { await logout(); navigate("/login"); }}
-              data-testid="player-logout"
-              className="flex items-center gap-1.5 text-[#A3A3A3] hover:text-white text-xs uppercase tracking-widest"
-            >
-              <LogOut className="w-3.5 h-3.5" /> Sair
-            </button>
-          </div>
+          <button
+            onClick={async () => { await logout(); navigate("/login"); }}
+            data-testid="player-logout"
+            className="flex items-center gap-1.5 text-[#A3A3A3] hover:text-white text-xs uppercase tracking-widest shrink-0"
+          >
+            <LogOut className="w-3.5 h-3.5" /> Sair
+          </button>
         </div>
         <div className="max-w-4xl mx-auto flex items-center gap-1 px-5 pb-0">
           {PLAYER_ITEMS.map((it) => (

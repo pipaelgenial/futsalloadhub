@@ -1,7 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Activity, LogOut, ShieldCheck } from "lucide-react";
-import ThemeToggle from "@/components/ThemeToggle";
 
 export default function AdminShell({ children }) {
   const { logout, user } = useAuth();
@@ -28,7 +27,6 @@ export default function AdminShell({ children }) {
             </div>
           </button>
           <div className="flex items-center gap-4">
-            <ThemeToggle />
             <div className="text-right hidden sm:block">
               <div className="text-[10px] uppercase tracking-widest text-[#525252]">Sessão de</div>
               <div className="text-xs font-bold" data-testid="admin-email">{user?.email}</div>
