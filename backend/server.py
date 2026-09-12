@@ -3322,14 +3322,20 @@ async def import_team_backup(
         except ValueError:
             wellness = None
 
-        # In merge mode, skip if the same athlete already has a session for
-        # this date+type (deterministic dedupe key).
+        # In merge mode, skip only when an identical row already exists
+        # (same athlete + date + type + rpe + duration + sleep + wellness).
+        # This still deduplicates re-imports of the same backup, but keeps
+        # legitimate double sessions (e.g. morning + afternoon training).
         if mode == "merge":
             dup = await db.sessions.find_one({
                 "team_id": team["id"],
                 "athlete_id": aid,
                 "date": date_str,
                 "session_type": stype,
+                "rpe": rpe,
+                "duration_min": duration,
+                "sleep_quality": sleep_q,
+                "wellness": wellness,
             })
             if dup:
                 sessions_skipped += 1
