@@ -3367,6 +3367,437 @@ async def import_team_backup(
     }
 
 
+# ---------------------- Full Athlete PDF Report (dark theme) ----------------------
+def _build_athlete_full_pdf(*, athlete: dict, team: dict, metrics: dict, series: list,
+                            sessions: list, injuries: list) -> bytes:
+    """Generate a dark-themed, shareable PDF with the athlete's complete record.
+    - dark background (#0A0A0A), lime (#CCFF00) accents, Barlow-condensed-like headers.
+    - Includes photo (if present), current metrics with zone colors,
+      an ACWR line chart image, injuries table and full session history.
+    """
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import cm, mm
+    from reportlab.lib.utils import ImageReader
+    from reportlab.platypus import (Image, PageBreak, Paragraph, SimpleDocTemplate,
+                                    Spacer, Table, TableStyle)
+    from reportlab.graphics.shapes import Drawing, Rect
+    from reportlab.graphics import renderPM
+
+    import base64 as _b64
+
+    # Palette
+    BG = colors.HexColor("#0A0A0A")
+    CARD = colors.HexColor("#141414")
+    LIME = colors.HexColor("#CCFF00")
+    WHITE = colors.HexColor("#FFFFFF")
+    MUTED = colors.HexColor("#A3A3A3")
+    DIM = colors.HexColor("#525252")
+    RED = colors.HexColor("#FF3B30")
+    GREEN = colors.HexColor("#00E676")
+    YELLOW = colors.HexColor("#FFEA00")
+    ORANGE = colors.HexColor("#FF9500")
+
+    def zone_color(zone: Optional[str]) -> colors.Color:
+        return {
+            "sweet_spot": GREEN, "ideal": GREEN, "high_variation": GREEN, "moderate": GREEN, "good": GREEN, "optimal": GREEN,
+            "alert": YELLOW, "detraining": YELLOW, "moderate_high": YELLOW, "elevated": YELLOW,
+            "high_risk": RED, "critical": RED, "extreme": RED, "depleted": RED,
+            "fatigued": ORANGE,
+        }.get(zone or "", DIM)
+
+    risk_color_map = {"safe": GREEN, "warning": YELLOW, "danger": RED}
+    risk_label_map = {"safe": "SEGURO", "warning": "ATENÇÃO", "danger": "RISCO ELEVADO", "insufficient_data": "DADOS INSUF."}
+
+    # ---------- Page background painter ----------
+    def _paint_bg(canvas, doc_):
+        canvas.saveState()
+        canvas.setFillColor(BG)
+        canvas.rect(0, 0, A4[0], A4[1], stroke=0, fill=1)
+        # top lime stripe
+        canvas.setFillColor(LIME)
+        canvas.rect(0, A4[1] - 4, A4[0], 4, stroke=0, fill=1)
+        # footer text
+        canvas.setFillColor(DIM)
+        canvas.setFont("Helvetica", 7)
+        canvas.drawRightString(
+            A4[0] - 2 * cm, 1.2 * cm,
+            f"FUTSAL LOAD HUB · Gerado {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M')} UTC",
+        )
+        canvas.drawString(2 * cm, 1.2 * cm, "REGISTO COMPLETO DO ATLETA")
+        canvas.restoreState()
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=1.6 * cm, rightMargin=1.6 * cm,
+        topMargin=1.4 * cm, bottomMargin=1.8 * cm,
+    )
+
+    # ---------- Paragraph styles ----------
+    p_title = ParagraphStyle("t", fontName="Helvetica-Bold", fontSize=28, leading=30, textColor=WHITE, spaceAfter=2)
+    p_kicker = ParagraphStyle("k", fontName="Helvetica-Bold", fontSize=8, textColor=LIME, leading=10, spaceAfter=6)
+    p_meta = ParagraphStyle("m", fontName="Helvetica", fontSize=9, textColor=MUTED, leading=13, spaceAfter=2)
+    p_section = ParagraphStyle("sec", fontName="Helvetica-Bold", fontSize=13, leading=16, textColor=WHITE, spaceBefore=14, spaceAfter=8)
+    p_body = ParagraphStyle("b", fontName="Helvetica", fontSize=9, textColor=MUTED, leading=12)
+
+    story = []
+
+    # ---------- Header block: photo + name + risk badge ----------
+    photo_flow = None
+    b64 = athlete.get("photo_data_b64")
+    if b64:
+        try:
+            img_bytes = _b64.b64decode(b64)
+            photo_flow = Image(io.BytesIO(img_bytes), width=3.2 * cm, height=3.2 * cm)
+        except Exception:
+            photo_flow = None
+    if photo_flow is None:
+        # Fallback: lime block with initials
+        d = Drawing(3.2 * cm, 3.2 * cm)
+        d.add(Rect(0, 0, 3.2 * cm, 3.2 * cm, fillColor=CARD, strokeColor=LIME, strokeWidth=1))
+        photo_flow = d
+
+    initials_or_photo = photo_flow
+
+    # Name block
+    jersey_html = f'<font color="#CCFF00">#{athlete.get("jersey_number")}</font> · ' if athlete.get("jersey_number") else ""
+    header_lines = [
+        Paragraph("FUTSAL LOAD HUB · REGISTO COMPLETO", p_kicker),
+        Paragraph((athlete.get("name") or "—").upper(), p_title),
+        Paragraph(
+            f'{jersey_html}{athlete.get("position") or "Sem posição"} · {team.get("name","")} · {team.get("escalao","")} · Época {team.get("epoca","")}',
+            p_meta,
+        ),
+    ]
+
+    risk_zone = metrics.get("risk", "insufficient_data")
+    risk_col = risk_color_map.get(risk_zone, DIM)
+    risk_lbl = risk_label_map.get(risk_zone, "—")
+    risk_box_data = [[Paragraph(f'<font color="#0A0A0A"><b>{risk_lbl}</b></font>', ParagraphStyle("rb", fontSize=9, alignment=1))]]
+    risk_box = Table(risk_box_data, colWidths=[3.6 * cm], rowHeights=[0.8 * cm])
+    risk_box.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), risk_col),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+    ]))
+
+    head_table = Table(
+        [[initials_or_photo, header_lines, risk_box]],
+        colWidths=[3.6 * cm, None, 3.8 * cm],
+    )
+    head_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(head_table)
+    story.append(Spacer(1, 4))
+    # Divider
+    div = Drawing(A4[0] - 3.2 * cm, 1)
+    div.add(Rect(0, 0, A4[0] - 3.2 * cm, 0.6, fillColor=colors.HexColor("#262626"), strokeColor=None))
+    story.append(div)
+
+    # ---------- Personal details ----------
+    details = []
+    if athlete.get("birth_date"):
+        try:
+            bd = datetime.strptime(athlete["birth_date"], "%Y-%m-%d").date()
+            age = int((date.today() - bd).days / 365.25)
+            details.append(f'<b>Data de nascimento:</b> {bd.strftime("%d/%m/%Y")} · <b>Idade:</b> {age}')
+        except Exception:
+            details.append(f'<b>Data de nascimento:</b> {athlete["birth_date"]}')
+    details.append(f'<b>Total de sessões registadas:</b> {len(sessions)}')
+    if metrics.get("acwr_method"):
+        details.append(f'<b>Método ACWR:</b> {metrics["acwr_method"].upper()}')
+    if athlete.get("is_injured"):
+        details.append(f'<font color="#FF3B30"><b>Lesionado atualmente</b></font>')
+    story.append(Paragraph(" · ".join(details), p_body))
+
+    # ---------- Metrics grid ----------
+    story.append(Paragraph("MÉTRICAS ATUAIS", p_section))
+
+    def metric_cell(label: str, value, unit: str = "", zone: str = None, accent: bool = False):
+        col = zone_color(zone) if zone else (LIME if accent else WHITE)
+        val_style = ParagraphStyle("mv", fontName="Helvetica-Bold", fontSize=18, textColor=col, leading=20)
+        lbl_style = ParagraphStyle("ml", fontName="Helvetica-Bold", fontSize=7, textColor=MUTED, leading=9, spaceAfter=2)
+        unit_txt = f' <font size=8 color="#525252">{unit}</font>' if unit else ""
+        return [
+            Paragraph(label.upper(), lbl_style),
+            Paragraph(f'{value}{unit_txt}', val_style),
+        ]
+
+    m = metrics
+    acwr_val = m.get("acwr", "—") if m.get("sufficient_data") else "—"
+    metric_rows = [
+        [
+            metric_cell("Carga Aguda", m.get("acute", 0), "UA"),
+            metric_cell("Carga Crónica", m.get("chronic", 0), "UA"),
+            metric_cell("ACWR", acwr_val, zone=m.get("acwr_zone"), accent=True),
+            metric_cell("Monotonia", m.get("monotony") or "—", zone=m.get("monotony_zone")),
+            metric_cell("Strain", m.get("strain") or "—", zone=m.get("strain_zone")),
+            metric_cell("Bem-estar 7d", m.get("wellness_7d") or "—",
+                        "/10" if m.get("wellness_7d") else "", zone=m.get("wellness_zone")),
+        ],
+    ]
+    mtable = Table(metric_rows, colWidths=[(A4[0] - 3.2 * cm) / 6.0] * 6)
+    mtable.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), CARD),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 12),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LINEBEFORE", (1, 0), (-1, -1), 0.4, colors.HexColor("#262626")),
+    ]))
+    story.append(mtable)
+
+    if metrics.get("risk_description"):
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(
+            f'<font color="#FFEA00">▸ {metrics["risk_description"]}</font>',
+            ParagraphStyle("rd", fontName="Helvetica", fontSize=8, textColor=YELLOW, leading=11),
+        ))
+
+    # ---------- ACWR chart (60 days) ----------
+    story.append(Paragraph("EVOLUÇÃO ACWR (ÚLTIMOS 60 DIAS)", p_section))
+    if metrics.get("sufficient_data") and series:
+        try:
+            from reportlab.graphics.shapes import PolyLine, String, Line
+            chart_w = int((A4[0] - 3.2 * cm))
+            chart_h = int(6.5 * cm)
+            d = Drawing(chart_w, chart_h)
+            # Background card
+            d.add(Rect(0, 0, chart_w, chart_h, fillColor=CARD, strokeColor=None))
+
+            n = len(series)
+            plot_x = 45
+            plot_y = 30
+            plot_w = chart_w - 90
+            plot_h = chart_h - 55
+            max_load = max([1.0] + [s.get("acute", 0) for s in series] + [s.get("chronic", 0) for s in series])
+            # Optimal ACWR band (0.8 - 1.3) as a subtle rectangle on the right axis
+            band_low = plot_y + (0.8 / 2.0) * plot_h
+            band_high = plot_y + (1.3 / 2.0) * plot_h
+            d.add(Rect(plot_x, band_low, plot_w, band_high - band_low,
+                       fillColor=colors.Color(0, 0.9, 0.46, alpha=0.06), strokeColor=None))
+
+            def _xy(i, v, vmax):
+                x = plot_x + (i / max(1, n - 1)) * plot_w
+                y = plot_y + (v / max(0.001, vmax)) * plot_h
+                return x, y
+
+            # Chronic (grey)
+            pts_chronic = []
+            for i, s in enumerate(series):
+                x, y = _xy(i, s.get("chronic", 0), max_load)
+                pts_chronic += [x, y]
+            d.add(PolyLine(pts_chronic, strokeColor=MUTED, strokeWidth=1.2))
+
+            # Acute (white)
+            pts_acute = []
+            for i, s in enumerate(series):
+                x, y = _xy(i, s.get("acute", 0), max_load)
+                pts_acute += [x, y]
+            d.add(PolyLine(pts_acute, strokeColor=WHITE, strokeWidth=1.4))
+
+            # ACWR (lime) — scaled to 0..2 mapped onto same plot area
+            pts_acwr = []
+            for i, s in enumerate(series):
+                v = min(2.0, max(0.0, s.get("acwr", 0)))
+                x = plot_x + (i / max(1, n - 1)) * plot_w
+                y = plot_y + (v / 2.0) * plot_h
+                pts_acwr += [x, y]
+            d.add(PolyLine(pts_acwr, strokeColor=LIME, strokeWidth=1.8))
+
+            # Left Y axis ticks (Aguda/Crónica UA)
+            for frac in (0.0, 0.5, 1.0):
+                yv = plot_y + frac * plot_h
+                d.add(Line(plot_x - 3, yv, plot_x, yv, strokeColor=DIM, strokeWidth=0.5))
+                d.add(String(plot_x - 6, yv - 3, str(int(max_load * frac)),
+                             fontName="Helvetica", fontSize=6, fillColor=MUTED, textAnchor="end"))
+            # Right Y axis ticks (ACWR 0..2)
+            for acwr_v in (0.0, 1.0, 2.0):
+                yv = plot_y + (acwr_v / 2.0) * plot_h
+                d.add(Line(plot_x + plot_w, yv, plot_x + plot_w + 3, yv, strokeColor=DIM, strokeWidth=0.5))
+                d.add(String(plot_x + plot_w + 6, yv - 3, f"{acwr_v:.1f}",
+                             fontName="Helvetica", fontSize=6, fillColor=LIME, textAnchor="start"))
+            # X axis labels (first, middle, last)
+            for idx in (0, n // 2, n - 1):
+                if 0 <= idx < n:
+                    x = plot_x + (idx / max(1, n - 1)) * plot_w
+                    d.add(String(x, plot_y - 10, series[idx]["date"][5:],
+                                 fontName="Helvetica", fontSize=6, fillColor=MUTED, textAnchor="middle"))
+            # Axis lines
+            d.add(Line(plot_x, plot_y, plot_x + plot_w, plot_y, strokeColor=DIM, strokeWidth=0.5))
+            d.add(Line(plot_x, plot_y, plot_x, plot_y + plot_h, strokeColor=DIM, strokeWidth=0.5))
+
+            legend_txt_style = ParagraphStyle("lg", fontName="Helvetica", fontSize=7, textColor=MUTED)
+            legend = Table(
+                [[
+                    Paragraph('<font color="#CCFF00">━</font> ACWR (0-2, direita)', legend_txt_style),
+                    Paragraph('<font color="#FFFFFF">━</font> Aguda (UA, esquerda)', legend_txt_style),
+                    Paragraph('<font color="#A3A3A3">━</font> Crónica (UA, esquerda)', legend_txt_style),
+                ]],
+                colWidths=[4.5 * cm, 4.5 * cm, 4.5 * cm],
+            )
+            legend.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), BG),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]))
+            story.append(d)
+            story.append(Spacer(1, 4))
+            story.append(legend)
+        except Exception as e:
+            story.append(Paragraph(f'<font color="#525252">Não foi possível renderizar o gráfico ({e})</font>', p_body))
+    else:
+        story.append(Paragraph(
+            '<font color="#525252">Dados insuficientes — o painel ACWR exibe dados a partir de 28 dias após o primeiro treino.</font>',
+            p_body,
+        ))
+
+    # ---------- Injuries history ----------
+    if injuries:
+        story.append(Paragraph("HISTÓRICO DE LESÕES", p_section))
+        head = ["Início", "Fim", "Tipo", "Zona", "Severidade", "Dias"]
+        rows = [head]
+        for inj in injuries:
+            sev = (inj.get("severity") or "").lower()
+            sev_lbl = {"low": "Baixa", "medium": "Média", "high": "Alta"}.get(sev, "—")
+            days = "—"
+            try:
+                sd = datetime.strptime(inj["start_date"], "%Y-%m-%d").date()
+                ed = datetime.strptime(inj["end_date"], "%Y-%m-%d").date() if inj.get("end_date") else date.today()
+                days = str((ed - sd).days)
+            except Exception:
+                pass
+            rows.append([
+                inj.get("start_date", "—"),
+                inj.get("end_date") or "em curso",
+                inj.get("type", "—"),
+                inj.get("body_part", "—"),
+                sev_lbl,
+                days,
+            ])
+        it = Table(rows, colWidths=[2.4*cm, 2.4*cm, 4.2*cm, 3.6*cm, 2.4*cm, 1.8*cm], repeatRows=1)
+        it.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), LIME),
+            ("TEXTCOLOR", (0, 0), (-1, 0), BG),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("TEXTCOLOR", (0, 1), (-1, -1), MUTED),
+            ("BACKGROUND", (0, 1), (-1, -1), CARD),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [CARD, colors.HexColor("#1A1A1A")]),
+            ("LINEBELOW", (0, 0), (-1, 0), 1, LIME),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        story.append(it)
+
+    # ---------- Sessions history (full) ----------
+    story.append(Paragraph(f"HISTÓRICO COMPLETO DE SESSÕES ({len(sessions)})", p_section))
+    type_pt = {"training": "Treino", "match": "Jogo", "gym": "Ginásio",
+               "recovery": "Recuperação", "rest": "Folga", "injury": "Lesão"}
+    # newest first
+    sorted_sessions = sorted(sessions, key=lambda s: s.get("date", ""), reverse=True)
+    rows = [["Data", "Tipo", "RPE", "Duração", "Carga", "Sono", "Bem-estar", "Notas"]]
+    for s in sorted_sessions:
+        rows.append([
+            s.get("date", "—"),
+            type_pt.get(s.get("session_type", "training"), s.get("session_type", "—")),
+            str(s.get("rpe", "—")),
+            f'{s.get("duration_min", 0)} min',
+            str(s.get("load", 0)),
+            str(s.get("sleep_quality") or "—"),
+            str(s.get("wellness") or "—"),
+            (s.get("notes") or "")[:40],
+        ])
+    st = Table(rows, colWidths=[2.2*cm, 2.2*cm, 1.2*cm, 1.8*cm, 1.6*cm, 1.4*cm, 1.8*cm, 4.6*cm], repeatRows=1)
+    st.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), LIME),
+        ("TEXTCOLOR", (0, 0), (-1, 0), BG),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("TEXTCOLOR", (0, 1), (-1, -1), MUTED),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [CARD, colors.HexColor("#1A1A1A")]),
+        ("LINEBELOW", (0, 0), (-1, 0), 1, LIME),
+        ("ALIGN", (2, 0), (6, -1), "CENTER"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    story.append(st)
+
+    doc.build(story, onFirstPage=_paint_bg, onLaterPages=_paint_bg)
+    return buf.getvalue()
+
+
+@api.get("/export/athlete/{athlete_id}/full-report.pdf")
+async def export_athlete_full_pdf(athlete_id: str, user=Depends(get_current_user)):
+    """Coach exports a shareable dark-themed PDF with the athlete's complete record."""
+    if user.get("role") != "coach":
+        raise HTTPException(403, "Apenas treinadores podem exportar")
+    team = await _get_team_or_404(user)
+    athlete = await db.athletes.find_one({"id": athlete_id, "team_id": team["id"]}, {"_id": 0})
+    if not athlete:
+        raise HTTPException(404, "Atleta não encontrado")
+    sessions = await db.sessions.find({"athlete_id": athlete_id}, {"_id": 0}).sort("date", 1).to_list(20000)
+    method = team.get("acwr_method") or DEFAULT_ACWR_METHOD
+    metrics = compute_metrics_for_athlete(sessions, method=method)
+    metrics["acwr_method"] = method
+
+    # ACWR series for the chart (last 60 days)
+    ref = date.today()
+    by_day = defaultdict(float)
+    by_day_adj = defaultdict(float)
+    for s in sessions:
+        d = _parse_date(s["date"])
+        by_day[d] += s["load"]
+        by_day_adj[d] += _load_adjusted(s)
+    series = []
+    for i in range(59, -1, -1):
+        d = ref - timedelta(days=i)
+        if method == "ewma":
+            acute, chronic = _ewma_acwr(by_day_adj, d)
+        else:
+            acute = sum(by_day.get(d - timedelta(days=j), 0) for j in range(7))
+            weekly = [sum(by_day.get(d - timedelta(days=j), 0) for j in range(w * 7, (w + 1) * 7)) for w in range(4)]
+            chronic = sum(weekly) / 4
+        acwr = round(acute / chronic, 2) if chronic > 0 else 0
+        series.append({
+            "date": d.isoformat(),
+            "acute": round(acute, 1),
+            "chronic": round(chronic, 1),
+            "acwr": acwr,
+        })
+
+    injuries = await db.injuries.find(
+        {"team_id": team["id"], "athlete_id": athlete_id}, {"_id": 0},
+    ).sort("start_date", -1).to_list(500)
+
+    pdf_bytes = _build_athlete_full_pdf(
+        athlete=athlete, team=team, metrics=metrics,
+        series=series, sessions=sessions, injuries=injuries,
+    )
+    safe_name = "".join(c if c.isalnum() else "_" for c in (athlete.get("name") or "atleta"))[:40]
+    fname = f"registo_{safe_name}_{date.today().isoformat()}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 def _build_summary_pdf(*, title: str, athlete_name: str, team_name: str, period_label: str, rows: list, headers: list, evolution: str, evolution_pct: float) -> bytes:
     """Generate a styled PDF summary using reportlab. Returns the bytes."""
     from reportlab.lib import colors

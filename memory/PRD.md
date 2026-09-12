@@ -217,6 +217,18 @@ e estilo dashboard.
 - Tema: Performance Pro dark (#0A0A0A) + accent volt yellow (#CCFF00),
   Barlow Condensed (headers) + Manrope (body) + JetBrains Mono (números)
 
+## Phase 18 — PDF completo do atleta (12 Set 2026)
+- Novo endpoint `GET /api/export/athlete/{id}/full-report.pdf` (só coach) que gera
+  um PDF **dark theme** (fundo #0A0A0A, accent lime #CCFF00) partilhável via URL.
+  Contém: foto, nome, dorsal, posição, equipa, badge de risco a cores, painel de
+  6 métricas (Aguda, Crónica, ACWR, Monotonia, Strain, Bem-estar 7d) com zonas
+  coloridas, gráfico ACWR desenhado com PolyLine (Aguda/Crónica em UA + ACWR 0-2)
+  com faixa "sweet spot" 0.8-1.3, histórico de lesões e histórico completo de
+  sessões (recente → antigo, paginação automática).
+- Botão **"PDF COMPLETO"** (`data-testid=export-full-pdf-btn`) na página de detalhe
+  do atleta, ao lado do badge de risco.
+- Nome do ficheiro: `registo_<Nome>_<data>.pdf`.
+
 ## Phase 17 — UX polish & Team backup (12 Set 2026)
 - **Menu reorganizado**: DASHBOARD, CALENDÁRIO, RESUMO SEMANAL, ATLETAS, COMPARAR, EQUIPA e
   **REGISTAR SESSÃO** destacado como CTA lime no fim do menu (sidebar + top bar mobile).
