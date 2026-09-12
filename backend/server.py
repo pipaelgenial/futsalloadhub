@@ -2146,9 +2146,23 @@ async def team_detailed(user=Depends(get_current_user)):
     athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).to_list(500)
     if not athletes:
         return {"team": team, "metrics": None, "series": []}
-    sessions = await db.sessions.find({"team_id": team["id"]}, {"_id": 0}).to_list(20000)
 
-    n_athletes = len(athletes)
+    # Exclude athletes with active injuries from the team average — an athlete
+    # who is out doesn't contribute to the training pool. Re-included as soon as
+    # `is_injured` is set to False.
+    active_athletes = [a for a in athletes if not a.get("is_injured")]
+    injured_ids = {a["id"] for a in athletes if a.get("is_injured")}
+    if not active_athletes:
+        return {"team": team, "metrics": None, "series": [], "n_athletes": 0,
+                "excluded_injured": len(injured_ids)}
+
+    active_ids = {a["id"] for a in active_athletes}
+    sessions = await db.sessions.find(
+        {"team_id": team["id"], "athlete_id": {"$in": list(active_ids)}},
+        {"_id": 0},
+    ).to_list(20000)
+
+    n_athletes = len(active_athletes)
     by_day = defaultdict(float)
     by_day_adj = defaultdict(float)
     for s in sessions:
@@ -2187,7 +2201,7 @@ async def team_detailed(user=Depends(get_current_user)):
             "acwr": acwr,
         })
 
-    return {"team": team, "metrics": metrics, "series": series, "n_athletes": n_athletes, "acwr_method": method}
+    return {"team": team, "metrics": metrics, "series": series, "n_athletes": n_athletes, "acwr_method": method, "excluded_injured": len(injured_ids)}
 
 
 @api.get("/analytics/weekly/team/overview")

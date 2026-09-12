@@ -3,6 +3,7 @@ import { useAuth } from "@/context/AuthContext";
 import { LayoutDashboard, Users, ClipboardEdit, Building2, LogOut, Activity, CalendarRange, GitCompareArrows, CalendarDays } from "lucide-react";
 import TeamSwitcher from "@/components/TeamSwitcher";
 import NotificationsBell from "@/components/NotificationsBell";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testid: "nav-dashboard" },
@@ -44,6 +45,7 @@ export default function AppShell({ children }) {
             <TeamSwitcher />
           </div>
           <NotificationsBell align="left" />
+          <ThemeToggle />
         </div>
 
         <nav className="flex-1 flex flex-col gap-1">
@@ -99,6 +101,7 @@ export default function AppShell({ children }) {
             <TeamSwitcher />
           </div>
           <NotificationsBell testid="notifications-bell-mobile" />
+          <ThemeToggle testid="theme-toggle-mobile" />
           <button onClick={async () => { await logout(); navigate("/login"); }} className="text-[#A3A3A3] shrink-0" data-testid="logout-btn-mobile">
             <LogOut className="w-4 h-4" />
           </button>

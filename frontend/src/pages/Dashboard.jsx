@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { http, formatApiError, downloadFile } from "@/lib/api";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
-import { RiskBadge, MonotonyAlert } from "@/components/Bits";
+import { RiskBadge } from "@/components/Bits";
 import PlayerAvatar from "@/components/PlayerAvatar";
 import { AlertTriangle, Database, ArrowRight, Trash2, FileDown } from "lucide-react";
 import {
@@ -46,7 +46,8 @@ export default function Dashboard() {
         if (data?.team) {
           setDetailSeries(data.series || []);
           setDetailMetrics(data.metrics);
-          setDetailLabel(`${data.team.name} (Equipa)`);
+          const excl = data.excluded_injured || 0;
+          setDetailLabel(`${data.team.name} (Equipa${excl ? ` — ${excl} lesionado${excl > 1 ? "s" : ""} excluído${excl > 1 ? "s" : ""}` : ""})`);
         } else {
           setDetailSeries([]);
           setDetailMetrics(null);
@@ -280,15 +281,6 @@ export default function Dashboard() {
               </div>
             )}
           </div>
-
-          {/* Team-wide monotony alert */}
-          {data.summary.avg_monotony > 0 && (
-            <MonotonyAlert
-              value={data.summary.avg_monotony}
-              zone={data.summary.avg_monotony_zone}
-              testid="team-monotony-alert"
-            />
-          )}
 
           {/* Risk Alerts */}
           {(() => {
