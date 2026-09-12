@@ -20,6 +20,8 @@ export default function Dashboard() {
   const [detailLabel, setDetailLabel] = useState("");
   const [selectedDetail, setSelectedDetail] = useState(TEAM_SELECTION);
   const [openInjuries, setOpenInjuries] = useState([]);
+  const [excludeInjured, setExcludeInjured] = useState(false);
+  const [injuredCount, setInjuredCount] = useState(0);
 
   async function load() {
     setLoading(true);
@@ -39,15 +41,19 @@ export default function Dashboard() {
   }
 
   // Fetch detailed view depending on selected entity
-  async function loadDetail(selection) {
+  async function loadDetail(selection, exclInjured = excludeInjured) {
     try {
       if (selection === TEAM_SELECTION) {
-        const { data } = await http.get("/analytics/team-detailed");
+        const { data } = await http.get(`/analytics/team-detailed?exclude_injured=${exclInjured}`);
         if (data?.team) {
           setDetailSeries(data.series || []);
           setDetailMetrics(data.metrics);
+          setInjuredCount(data.injured_count || 0);
           const excl = data.excluded_injured || 0;
-          setDetailLabel(`${data.team.name} (Equipa${excl ? ` — ${excl} lesionado${excl > 1 ? "s" : ""} excluído${excl > 1 ? "s" : ""}` : ""})`);
+          const label = data.exclude_injured && excl
+            ? `${data.team.name} (Equipa — ${excl} lesionado${excl > 1 ? "s" : ""} excluído${excl > 1 ? "s" : ""})`
+            : `${data.team.name} (Equipa)`;
+          setDetailLabel(label);
         } else {
           setDetailSeries([]);
           setDetailMetrics(null);
@@ -200,6 +206,21 @@ export default function Dashboard() {
                     ))}
                   </optgroup>
                 </select>
+                {selectedDetail === TEAM_SELECTION && (
+                  <label
+                    className="flex items-center gap-2 text-xs uppercase tracking-widest text-[#A3A3A3] hover:text-white cursor-pointer select-none"
+                    title={injuredCount ? `${injuredCount} atleta(s) lesionado(s) atualmente` : "Não há atletas lesionados"}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={excludeInjured}
+                      onChange={(e) => { setExcludeInjured(e.target.checked); loadDetail(TEAM_SELECTION, e.target.checked); }}
+                      data-testid="exclude-injured-checkbox"
+                      className="w-4 h-4 accent-[#CCFF00]"
+                    />
+                    <span>Excluir lesionados{injuredCount ? ` (${injuredCount})` : ""}</span>
+                  </label>
+                )}
                 <div className="text-xs text-[#A3A3A3] hidden md:flex gap-4">
                   <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-[#CCFF00] inline-block" /> ACWR</span>
                   <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-white inline-block" /> Aguda</span>

@@ -189,8 +189,8 @@ class SessionIn(BaseModel):
 
 class SessionUpdate(BaseModel):
     date: Optional[str] = None
-    rpe: Optional[int] = Field(default=None, ge=1, le=10)
-    duration_min: Optional[int] = Field(default=None, ge=1, le=300)
+    rpe: Optional[int] = Field(default=None, ge=0, le=10)  # 0 permitido em folga/lesão
+    duration_min: Optional[int] = Field(default=None, ge=0, le=300)  # 0 permitido em folga/lesão
     sleep_quality: Optional[int] = Field(default=None, ge=1, le=5)
     wellness: Optional[int] = Field(default=None, ge=1, le=10)
     session_type: Optional[str] = None
@@ -659,11 +659,21 @@ async def upload_team_logo(team_id: str, file: UploadFile = File(...), user=Depe
             (TEAM_LOGO_DIR / team["logo_path"]).unlink(missing_ok=True)
         except Exception:
             pass
+    import base64 as _b64
+    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}[ext]
     filename = f"{team_id}_{uuid.uuid4().hex[:8]}.{ext}"
-    (TEAM_LOGO_DIR / filename).write_bytes(data)
+    try:
+        (TEAM_LOGO_DIR / filename).write_bytes(data)
+    except Exception:
+        pass
     await db.teams.update_one(
         {"id": team_id},
-        {"$set": {"logo_path": filename, "logo_updated_at": datetime.now(timezone.utc).isoformat()}},
+        {"$set": {
+            "logo_path": filename,
+            "logo_data_b64": _b64.b64encode(data).decode("ascii"),
+            "logo_mime": mime,
+            "logo_updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
     )
     return {"ok": True, "logo_path": filename, "url": f"/api/teams/{team_id}/logo"}
 
@@ -678,22 +688,32 @@ async def remove_team_logo(team_id: str, user=Depends(get_current_user)):
             (TEAM_LOGO_DIR / team["logo_path"]).unlink(missing_ok=True)
         except Exception:
             pass
-    await db.teams.update_one({"id": team_id}, {"$set": {"logo_path": None}})
+    await db.teams.update_one({"id": team_id}, {"$set": {
+        "logo_path": None, "logo_data_b64": None, "logo_mime": None,
+    }})
     return {"ok": True}
 
 
 @api.get("/teams/{team_id}/logo")
 async def get_team_logo(team_id: str):
-    """Public logo endpoint so <img src> works directly."""
+    """Public logo endpoint. Serves from DB base64 (source of truth); disk fallback."""
+    from fastapi.responses import Response as _Resp
+    import base64 as _b64
     team = await db.teams.find_one({"id": team_id})
-    if not team or not team.get("logo_path"):
+    if not team:
         raise HTTPException(404, "Sem logo")
-    fp = TEAM_LOGO_DIR / team["logo_path"]
-    if not fp.exists():
-        raise HTTPException(404, "Ficheiro não encontrado")
-    ext = team["logo_path"].rsplit(".", 1)[-1].lower()
-    mt = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
-    return FileResponse(fp, media_type=mt)
+    b64 = team.get("logo_data_b64")
+    mime = team.get("logo_mime")
+    if b64 and mime:
+        return _Resp(content=_b64.b64decode(b64), media_type=mime,
+                     headers={"Cache-Control": "public, max-age=300"})
+    if team.get("logo_path"):
+        fp = TEAM_LOGO_DIR / team["logo_path"]
+        if fp.exists():
+            ext = team["logo_path"].rsplit(".", 1)[-1].lower()
+            mt = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
+            return FileResponse(fp, media_type=mt)
+    raise HTTPException(404, "Sem logo")
 
 
 # ---------------------- Athletes ----------------------
@@ -761,19 +781,30 @@ async def upload_photo(athlete_id: str, file: UploadFile = File(...), user=Depen
     if len(data) > 5 * 1024 * 1024:
         raise HTTPException(400, "Imagem demasiado grande (máx 5MB)")
 
-    # remove old photo
+    # remove old on-disk file (legacy), keep DB base64 as source of truth
     if athlete.get("photo_path"):
         try:
             (UPLOAD_DIR / athlete["photo_path"]).unlink(missing_ok=True)
         except Exception:
             pass
 
+    import base64 as _b64
+    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}[ext]
     filename = f"{athlete_id}_{uuid.uuid4().hex[:8]}.{ext}"
-    (UPLOAD_DIR / filename).write_bytes(data)
+    # Write to disk as best-effort cache (ephemeral in prod)
+    try:
+        (UPLOAD_DIR / filename).write_bytes(data)
+    except Exception:
+        pass
 
     await db.athletes.update_one(
         {"id": athlete_id, "team_id": team["id"]},
-        {"$set": {"photo_path": filename, "photo_updated_at": datetime.now(timezone.utc).isoformat()}},
+        {"$set": {
+            "photo_path": filename,
+            "photo_data_b64": _b64.b64encode(data).decode("ascii"),
+            "photo_mime": mime,
+            "photo_updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
     )
     return {"ok": True, "photo_path": filename, "url": f"/api/athletes/{athlete_id}/photo"}
 
@@ -791,23 +822,36 @@ async def remove_photo(athlete_id: str, user=Depends(get_current_user)):
             pass
     await db.athletes.update_one(
         {"id": athlete_id, "team_id": team["id"]},
-        {"$set": {"photo_path": None}},
+        {"$set": {"photo_path": None, "photo_data_b64": None, "photo_mime": None}},
     )
     return {"ok": True}
 
 
 @api.get("/athletes/{athlete_id}/photo")
 async def get_photo(athlete_id: str):
-    """Public photo endpoint (no auth) so <img src> works directly."""
+    """Public photo endpoint (no auth) so <img src> works directly.
+
+    Serves from MongoDB base64 (source of truth). Falls back to disk file (legacy).
+    """
+    from fastapi.responses import Response as _Resp
+    import base64 as _b64
     athlete = await db.athletes.find_one({"id": athlete_id})
-    if not athlete or not athlete.get("photo_path"):
+    if not athlete:
         raise HTTPException(404, "Sem foto")
-    fp = UPLOAD_DIR / athlete["photo_path"]
-    if not fp.exists():
-        raise HTTPException(404, "Ficheiro não encontrado")
-    ext = athlete["photo_path"].rsplit(".", 1)[-1].lower()
-    mt = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
-    return FileResponse(fp, media_type=mt)
+    # Prefer DB base64
+    b64 = athlete.get("photo_data_b64")
+    mime = athlete.get("photo_mime")
+    if b64 and mime:
+        return _Resp(content=_b64.b64decode(b64), media_type=mime,
+                     headers={"Cache-Control": "public, max-age=300"})
+    # Legacy disk fallback
+    if athlete.get("photo_path"):
+        fp = UPLOAD_DIR / athlete["photo_path"]
+        if fp.exists():
+            ext = athlete["photo_path"].rsplit(".", 1)[-1].lower()
+            mt = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
+            return FileResponse(fp, media_type=mt)
+    raise HTTPException(404, "Sem foto")
 
 
 # ---------------------- Sessions ----------------------
@@ -1020,9 +1064,13 @@ async def update_session(session_id: str, data: SessionUpdate, user=Depends(get_
         updates["session_type"] = data.session_type
     if data.notes is not None:
         updates["notes"] = data.notes
-    # recompute load if rpe or duration changed
+    # Guard: non-rest/injury sessions require rpe & duration >= 1
+    effective_type = updates.get("session_type", existing.get("session_type", "training"))
     new_rpe = updates.get("rpe", existing["rpe"])
     new_dur = updates.get("duration_min", existing["duration_min"])
+    if effective_type not in {"rest", "injury"}:
+        if new_rpe < 1 or new_dur < 1:
+            raise HTTPException(400, "Sessões de treino/jogo/ginásio/recuperação requerem RPE e duração ≥ 1")
     updates["load"] = new_rpe * new_dur
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.sessions.update_one({"id": session_id}, {"$set": updates})
@@ -2135,9 +2183,12 @@ def _team_metrics_from_daily(by_day: dict, ref_date: Optional[date] = None,
 
 
 @api.get("/analytics/team-detailed")
-async def team_detailed(user=Depends(get_current_user)):
-    """Team-wide ACWR series & metrics computed from average per-athlete daily load
-    (so the magnitude is comparable to an individual athlete)."""
+async def team_detailed(exclude_injured: bool = False, user=Depends(get_current_user)):
+    """Team-wide ACWR series & metrics computed from average per-athlete daily load.
+
+    exclude_injured: when True, athletes with is_injured=True are removed from
+    both the pool count and the daily load sum. Default False (include everyone).
+    """
     team = await _get_active_team(user, required=False)
     if team:
         team = {k: v for k, v in team.items() if k != "_id"}
@@ -2147,14 +2198,14 @@ async def team_detailed(user=Depends(get_current_user)):
     if not athletes:
         return {"team": team, "metrics": None, "series": []}
 
-    # Exclude athletes with active injuries from the team average — an athlete
-    # who is out doesn't contribute to the training pool. Re-included as soon as
-    # `is_injured` is set to False.
-    active_athletes = [a for a in athletes if not a.get("is_injured")]
     injured_ids = {a["id"] for a in athletes if a.get("is_injured")}
+    if exclude_injured:
+        active_athletes = [a for a in athletes if not a.get("is_injured")]
+    else:
+        active_athletes = athletes
     if not active_athletes:
         return {"team": team, "metrics": None, "series": [], "n_athletes": 0,
-                "excluded_injured": len(injured_ids)}
+                "excluded_injured": len(injured_ids), "exclude_injured": exclude_injured}
 
     active_ids = {a["id"] for a in active_athletes}
     sessions = await db.sessions.find(
@@ -2201,7 +2252,7 @@ async def team_detailed(user=Depends(get_current_user)):
             "acwr": acwr,
         })
 
-    return {"team": team, "metrics": metrics, "series": series, "n_athletes": n_athletes, "acwr_method": method, "excluded_injured": len(injured_ids)}
+    return {"team": team, "metrics": metrics, "series": series, "n_athletes": n_athletes, "acwr_method": method, "excluded_injured": len(injured_ids), "exclude_injured": exclude_injured, "injured_count": len(injured_ids)}
 
 
 @api.get("/analytics/weekly/team/overview")
