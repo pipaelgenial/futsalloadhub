@@ -6,13 +6,14 @@ import NotificationsBell from "@/components/NotificationsBell";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testid: "nav-dashboard" },
-  { to: "/equipa", label: "Equipa", icon: Building2, testid: "nav-team" },
-  { to: "/atletas", label: "Atletas", icon: Users, testid: "nav-athletes" },
-  { to: "/registar-sessao", label: "Registar Sessão", icon: ClipboardEdit, testid: "nav-log" },
   { to: "/calendario", label: "Calendário", icon: CalendarDays, testid: "nav-calendar" },
   { to: "/resumo-semanal", label: "Resumo Semanal", icon: CalendarRange, testid: "nav-weekly" },
+  { to: "/atletas", label: "Atletas", icon: Users, testid: "nav-athletes" },
   { to: "/comparar", label: "Comparar", icon: GitCompareArrows, testid: "nav-compare" },
+  { to: "/equipa", label: "Equipa", icon: Building2, testid: "nav-team" },
 ];
+
+const CTA_LINK = { to: "/registar-sessao", label: "Registar Sessão", icon: ClipboardEdit, testid: "nav-log" };
 
 export default function AppShell({ children }) {
   const { user, logout } = useAuth();
@@ -65,6 +66,24 @@ export default function AppShell({ children }) {
               {l.label}
             </NavLink>
           ))}
+
+          {/* CTA — Registar Sessão (destaque) */}
+          <div className="mt-4 pt-4 border-t border-white/5">
+            <NavLink
+              to={CTA_LINK.to}
+              data-testid={CTA_LINK.testid}
+              className={({ isActive }) =>
+                `flex items-center justify-center gap-2 px-4 py-3 font-head font-extrabold tracking-widest text-xs uppercase transition-all ${
+                  isActive
+                    ? "bg-[#CCFF00] text-black"
+                    : "bg-[#CCFF00]/10 border border-[#CCFF00]/60 text-[#CCFF00] hover:bg-[#CCFF00] hover:text-black"
+                }`
+              }
+            >
+              <CTA_LINK.icon className="w-4 h-4" />
+              {CTA_LINK.label}
+            </NavLink>
+          </div>
         </nav>
 
         <div className="border-t border-white/5 pt-4 mt-4">
@@ -104,14 +123,20 @@ export default function AppShell({ children }) {
           </button>
         </div>
         <div className="md:hidden flex overflow-x-auto border-b border-white/5">
-          {links.map((l) => (
+          {[...links, CTA_LINK].map((l) => (
             <NavLink
               key={l.to}
               to={l.to}
               end={l.to === "/"}
               className={({ isActive }) =>
                 `flex items-center gap-2 px-4 py-3 font-head text-xs whitespace-nowrap border-b-2 ${
-                  isActive ? "border-[#CCFF00] text-white" : "border-transparent text-[#A3A3A3]"
+                  l.to === CTA_LINK.to
+                    ? isActive
+                      ? "border-[#CCFF00] text-[#CCFF00] font-extrabold"
+                      : "border-transparent text-[#CCFF00] font-bold"
+                    : isActive
+                      ? "border-[#CCFF00] text-white"
+                      : "border-transparent text-[#A3A3A3]"
                 }`
               }
             >

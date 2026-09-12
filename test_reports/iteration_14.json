@@ -1,0 +1,30 @@
+{
+  "summary": "Iteration 14 end-to-end testing (backend + frontend) covering the 5 requested UX changes: (1) menu reorder + REGISTAR SESSÃO CTA at bottom, (2) DADOS DEMO button removed, (3) per-athlete exclusion dropdown with injured badge on Dashboard, (4) chart zoom controls (buttons, slider, presets), (5) team backup export/import (ZIP with atletas.csv + sessoes.csv). All 6 backend pytest cases pass (baseline team-detailed, exclude_athlete_ids, export ZIP, import merge dedupe, import replace, invalid mode). Frontend Playwright walkthrough validates every data-testid, correct DOM ordering, DADOS DEMO absent, CSV 30D + RESET TOTAL still present, athlete filter opens with 8 rows/checkboxes, TODOS + SEM LESIONADOS quick actions present, unchecking triggers API call with ?exclude_athlete_ids=..., all zoom controls render, export triggers download of backup_Sporting_Futsal_Lisboa_<date>.zip, and player regression (/atleta) still shows Registar + Histórico correctly.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard detailed chart zoom controls", "issues": ["Icon assignments look swapped: data-testid='zoom-out-btn' renders <ZoomIn/> icon and data-testid='zoom-in-btn' renders <ZoomOut/> icon (Dashboard.jsx lines 355/362). Functionally 'zoom-out'=less days, 'zoom-in'=more days works, but users will see the opposite icon. Consider swapping the icons or renaming testids."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration14.py",
+    "/app/test_reports/pytest/iteration14.xml"
+  ],
+  "action_items": [
+    "Optional: swap the zoom-in/zoom-out icons on Dashboard chart zoom controls so the icon matches the label/intent."
+  ],
+  "critical_code_review_comments": [
+    "server.py has grown to ~3560 lines — high time to split into routers (auth, athletes, sessions, analytics, backup, admin). Maintenance risk.",
+    "Export/import ZIP has no size limit — a malicious client could POST a very large ZIP. Consider MAX_UPLOAD_SIZE guard.",
+    "In import merge mode, dedupe key is (athlete_id, date, session_type) — two legitimate sessions of the same type on the same day (rare but possible: morning + afternoon training) would be dropped. Acceptable but worth documenting."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration14.py"],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100% of the requested checks (all testids found, integrations working, download triggered)"},
+  "test_credentials": "coach treinador@futsal.pt / treinador123; player jogador1@futsal.pt / jogador123 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None — used existing Sporting Futsal Lisboa demo team (8 athletes). test_import_replace_wipes_and_reinserts wipes and re-imports from the just-exported ZIP so the team state is preserved after the run (same athlete ids/sessions restored).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 14 (menu reorder + backup + athlete-filter dropdown + chart zoom) is verified. Test suite /app/backend/tests/test_iteration14.py is idempotent — it exports, then re-imports over the current team (merge → all dupes; replace → wipe & reinsert same rows). Note athlete IDs are preserved across replace because CSV keeps the source id. If you want to re-test just the frontend, no seeding needed."
+}

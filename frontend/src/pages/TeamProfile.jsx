@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
-import { http, formatApiError } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { http, formatApiError, downloadFile } from "@/lib/api";
 import { toast } from "sonner";
-import { Plus, Trash2, Pencil, Sliders } from "lucide-react";
+import { Plus, Trash2, Pencil, Sliders, Download, Upload } from "lucide-react";
 import TeamLogo from "@/components/TeamLogo";
 
 const MAX_TEAMS = 5;
@@ -23,6 +23,39 @@ export default function TeamProfile() {
   const [editing, setEditing] = useState(null); // id or "new"
   const [form, setForm] = useState({ name: "", escalao: "", epoca: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra" });
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const fileRef = useRef(null);
+
+  async function exportBackup() {
+    try {
+      await downloadFile("/export/team-backup.zip", "backup.zip");
+      toast.success("Backup gerado");
+    } catch (err) { toast.error(formatApiError(err)); }
+  }
+
+  async function importBackup(e) {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const mode = window.confirm(
+      "Como queres importar?\n\nOK = SUBSTITUIR (apaga atletas e sessões atuais)\nCancelar = ADICIONAR (mantém dados atuais, só adiciona novos)"
+    ) ? "replace" : "merge";
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      const { data } = await http.post(`/import/team-backup?mode=${mode}`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      toast.success(
+        `Import concluído · ${data.athletes_created} atletas novos, ${data.athletes_matched} correspondidos, ${data.sessions_created} sessões, ${data.sessions_skipped} ignoradas`
+      );
+      window.dispatchEvent(new Event("active-team-changed"));
+    } catch (err) { toast.error(formatApiError(err)); }
+    finally {
+      setImporting(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
 
   async function load() {
     setLoading(true);
@@ -134,14 +167,41 @@ export default function TeamProfile() {
           <h1 className="font-head text-3xl sm:text-4xl md:text-5xl font-black leading-none">EQUIPAS</h1>
           <p className="text-[#A3A3A3] text-sm mt-2">Até {MAX_TEAMS} equipas com dados independentes</p>
         </div>
-        <button
-          onClick={startNew}
-          disabled={teams.length >= MAX_TEAMS || editing !== null}
-          className="fld-btn-primary flex items-center gap-2 disabled:opacity-50"
-          data-testid="add-team-btn"
-        >
-          <Plus className="w-4 h-4" /> NOVA EQUIPA <span className="text-xs">({teams.length}/{MAX_TEAMS})</span>
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={exportBackup}
+            disabled={teams.length === 0}
+            className="fld-btn-ghost flex items-center gap-2 disabled:opacity-40"
+            data-testid="export-backup-btn"
+            title="Descarregar um ZIP com atletas.csv + sessoes.csv da equipa ativa"
+          >
+            <Download className="w-4 h-4" /> EXPORTAR BACKUP
+          </button>
+          <label
+            className={`fld-btn-ghost flex items-center gap-2 cursor-pointer ${importing || teams.length === 0 ? "opacity-40 pointer-events-none" : ""}`}
+            data-testid="import-backup-label"
+            title="Importar um backup ZIP (atletas.csv + sessoes.csv) para a equipa ativa"
+          >
+            <Upload className="w-4 h-4" /> {importing ? "A IMPORTAR..." : "IMPORTAR BACKUP"}
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".zip,.csv"
+              onChange={importBackup}
+              disabled={importing || teams.length === 0}
+              className="hidden"
+              data-testid="import-backup-input"
+            />
+          </label>
+          <button
+            onClick={startNew}
+            disabled={teams.length >= MAX_TEAMS || editing !== null}
+            className="fld-btn-primary flex items-center gap-2 disabled:opacity-50"
+            data-testid="add-team-btn"
+          >
+            <Plus className="w-4 h-4" /> NOVA EQUIPA <span className="text-xs">({teams.length}/{MAX_TEAMS})</span>
+          </button>
+        </div>
       </div>
 
       {teams.length === 0 && editing !== "new" && (

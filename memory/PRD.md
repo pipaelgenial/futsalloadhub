@@ -217,8 +217,23 @@ e estilo dashboard.
 - Tema: Performance Pro dark (#0A0A0A) + accent volt yellow (#CCFF00),
   Barlow Condensed (headers) + Manrope (body) + JetBrains Mono (números)
 
+## Phase 17 — UX polish & Team backup (12 Set 2026)
+- **Menu reorganizado**: DASHBOARD, CALENDÁRIO, RESUMO SEMANAL, ATLETAS, COMPARAR, EQUIPA e
+  **REGISTAR SESSÃO** destacado como CTA lime no fim do menu (sidebar + top bar mobile).
+- **Removido botão "DADOS DEMO"** do Dashboard.
+- **Filtro de atletas por dropdown**: substitui a checkbox "excluir lesionados" na vista
+  detalhada do Dashboard. Todos os atletas vêm marcados; o utilizador desmarca quem quiser.
+  Lesionados ganham badge vermelho "LESIONADO". Ações rápidas "TODOS" e "SEM LESIONADOS".
+  Gráfico + métricas atualizam automaticamente via useEffect.
+- **Zoom no gráfico da vista detalhada**: botões +/- (`ZoomOut` mostra mais dias, `ZoomIn`
+  mostra menos), slider e presets 7D/14D/30D/60D/TUDO (default 30D).
+- **Backup CSV** de equipa: `GET /api/export/team-backup.zip` gera ZIP com `atletas.csv` +
+  `sessoes.csv` (semicolon-separated, UTF-8 com BOM). `POST /api/import/team-backup?mode=(merge|replace)`
+  aceita o ZIP (ou CSV solto) e restaura. Merge dedupe por (atleta+data+tipo); Replace apaga
+  atletas/sessões existentes primeiro. UI em `/equipa` (Exportar Backup + Importar Backup).
+- **Backend**: `/api/analytics/team-detailed` aceita `exclude_athlete_ids=id1,id2,...`.
+
 ## Next Actions
-1. Implementar resumo mensal por atleta
-2. Implementar página de comparação de 2 atletas (parcialmente já existe via /comparar)
-3. Refatorar server.py em módulos (routers/services)
-4. Tornar todo o seed/demo idempotente (atualmente só o active_team_id é refeito; sessões/atletas/injuries são recriados sempre)
+1. Refatorar server.py (~3560 linhas) em routers/services (auth, athletes, sessions, analytics, backup, admin)
+2. MAX_UPLOAD_SIZE guard no /import/team-backup
+3. Documentar que dedupe do import merge é por (atleta_id, date, session_type) — treinos duplos no mesmo dia são ignorados

@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import { RiskBadge } from "@/components/Bits";
 import PlayerAvatar from "@/components/PlayerAvatar";
-import { AlertTriangle, Database, ArrowRight, Trash2, FileDown } from "lucide-react";
+import { AlertTriangle, ArrowRight, Trash2, FileDown, Users as UsersIcon, ZoomIn, ZoomOut } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceArea, CartesianGrid,
 } from "recharts";
@@ -20,8 +20,10 @@ export default function Dashboard() {
   const [detailLabel, setDetailLabel] = useState("");
   const [selectedDetail, setSelectedDetail] = useState(TEAM_SELECTION);
   const [openInjuries, setOpenInjuries] = useState([]);
-  const [excludeInjured, setExcludeInjured] = useState(false);
+  const [excludedAthleteIds, setExcludedAthleteIds] = useState([]);
+  const [athleteFilterOpen, setAthleteFilterOpen] = useState(false);
   const [injuredCount, setInjuredCount] = useState(0);
+  const [visibleDays, setVisibleDays] = useState(30);
 
   async function load() {
     setLoading(true);
@@ -41,10 +43,15 @@ export default function Dashboard() {
   }
 
   // Fetch detailed view depending on selected entity
-  async function loadDetail(selection, exclInjured = excludeInjured) {
+  async function loadDetail(selection, excludedIds = excludedAthleteIds) {
     try {
       if (selection === TEAM_SELECTION) {
-        const { data } = await http.get(`/analytics/team-detailed?exclude_injured=${exclInjured}`);
+        const params = new URLSearchParams();
+        if (excludedIds && excludedIds.length > 0) {
+          params.set("exclude_athlete_ids", excludedIds.join(","));
+        }
+        const qs = params.toString();
+        const { data } = await http.get(`/analytics/team-detailed${qs ? `?${qs}` : ""}`);
         if (data?.team) {
           setDetailSeries(data.series || []);
           setDetailMetrics(data.metrics);
@@ -65,19 +72,8 @@ export default function Dashboard() {
 
   useEffect(() => { load(); }, []);
   useEffect(() => {
-    if (data?.team && data.athletes.length > 0) loadDetail(selectedDetail, excludeInjured);
-  }, [data?.team?.id, selectedDetail, excludeInjured]);
-
-  async function seedDemo() {
-    setSeeding(true);
-    try {
-      await http.post("/seed/demo");
-      toast.success("Dados de demonstração criados");
-      await load();
-    } catch (err) {
-      toast.error(formatApiError(err));
-    } finally { setSeeding(false); }
-  }
+    if (data?.team && data.athletes.length > 0) loadDetail(selectedDetail, excludedAthleteIds);
+  }, [data?.team?.id, selectedDetail, excludedAthleteIds]);
 
   async function resetAll() {
     const txt = window.prompt(
@@ -136,9 +132,6 @@ export default function Dashboard() {
             title="Exporta sessões dos últimos 30 dias para CSV"
           >
             <FileDown className="w-4 h-4" /> CSV 30D
-          </button>
-          <button onClick={seedDemo} disabled={seeding} className="fld-btn-ghost flex items-center gap-2" data-testid="seed-demo-btn">
-            <Database className="w-4 h-4" /> {seeding ? "A GERAR..." : "DADOS DEMO"}
           </button>
           <button
             onClick={resetAll}
@@ -203,19 +196,87 @@ export default function Dashboard() {
                   </optgroup>
                 </select>
                 {selectedDetail === TEAM_SELECTION && (
-                  <label
-                    className="flex items-center gap-2 text-xs uppercase tracking-widest text-[#A3A3A3] hover:text-white cursor-pointer select-none"
-                    title={injuredCount ? `${injuredCount} atleta(s) lesionado(s) atualmente` : "Não há atletas lesionados"}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={excludeInjured}
-                      onChange={(e) => setExcludeInjured(e.target.checked)}
-                      data-testid="exclude-injured-checkbox"
-                      className="w-4 h-4 accent-[#CCFF00]"
-                    />
-                    <span>Excluir lesionados{injuredCount ? ` (${injuredCount})` : ""}</span>
-                  </label>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setAthleteFilterOpen((v) => !v)}
+                      data-testid="athlete-filter-btn"
+                      className="fld-btn-ghost text-xs flex items-center gap-2 py-2"
+                      title="Escolher que atletas contam para o gráfico da equipa"
+                    >
+                      <UsersIcon className="w-3.5 h-3.5" />
+                      Atletas incluídos
+                      <span className="metric-num text-[#CCFF00]">
+                        {data.athletes.length - excludedAthleteIds.length}/{data.athletes.length}
+                      </span>
+                    </button>
+                    {athleteFilterOpen && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-20"
+                          onClick={() => setAthleteFilterOpen(false)}
+                        />
+                        <div
+                          className="absolute right-0 mt-2 w-72 max-h-96 overflow-y-auto z-30 bg-[#141414] border border-white/10 shadow-2xl"
+                          data-testid="athlete-filter-panel"
+                        >
+                          <div className="flex items-center justify-between p-3 border-b border-white/5">
+                            <div className="text-[10px] font-head uppercase tracking-widest text-[#A3A3A3]">Filtrar atletas</div>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setExcludedAthleteIds([])}
+                                className="text-[10px] uppercase tracking-widest text-[#CCFF00] hover:underline"
+                                data-testid="athlete-filter-all"
+                              >Todos</button>
+                              <span className="text-[10px] text-[#525252]">·</span>
+                              <button
+                                type="button"
+                                onClick={() => setExcludedAthleteIds(data.athletes.filter((a) => a.is_injured).map((a) => a.id))}
+                                className="text-[10px] uppercase tracking-widest text-[#A3A3A3] hover:text-white"
+                                data-testid="athlete-filter-exclude-injured"
+                                title="Excluir apenas os atletas lesionados"
+                              >Sem lesionados</button>
+                            </div>
+                          </div>
+                          {data.athletes.map((a) => {
+                            const checked = !excludedAthleteIds.includes(a.id);
+                            return (
+                              <label
+                                key={a.id}
+                                className="flex items-center gap-2 px-3 py-2 hover:bg-white/5 cursor-pointer border-b border-white/[0.03]"
+                                data-testid={`athlete-filter-row-${a.id}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setExcludedAthleteIds((prev) => prev.filter((id) => id !== a.id));
+                                    } else {
+                                      setExcludedAthleteIds((prev) => [...prev, a.id]);
+                                    }
+                                  }}
+                                  className="w-4 h-4 accent-[#CCFF00]"
+                                  data-testid={`athlete-filter-check-${a.id}`}
+                                />
+                                <span className="flex-1 text-sm truncate">
+                                  {a.name}
+                                  {a.jersey_number ? <span className="text-[#525252] ml-1">#{a.jersey_number}</span> : null}
+                                </span>
+                                {a.is_injured && (
+                                  <span
+                                    className="text-[9px] font-head font-extrabold uppercase tracking-widest px-1.5 py-0.5 border border-[#FF3B30]/40 text-[#FF3B30] bg-[#FF3B30]/10"
+                                    title="Atleta lesionado"
+                                  >Lesionado</span>
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 )}
                 <div className="text-xs text-[#A3A3A3] hidden md:flex gap-4">
                   <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-[#CCFF00] inline-block" /> ACWR</span>
@@ -281,21 +342,81 @@ export default function Dashboard() {
                 </p>
               </div>
             ) : (
-              <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={detailSeries} margin={{ top: 10, right: 10, bottom: 0, left: -10 }}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" tick={{ fill: "#525252", fontSize: 10 }} tickFormatter={(v) => v.slice(5)} />
-                    <YAxis yAxisId="left" tick={{ fill: "#525252", fontSize: 10 }} />
-                    <YAxis yAxisId="right" orientation="right" tick={{ fill: "#CCFF00", fontSize: 10 }} domain={[0, 2]} />
-                    <Tooltip contentStyle={{ background: "#141414", border: "1px solid rgba(255,255,255,0.15)" }} labelStyle={{ color: "#CCFF00" }} />
-                    <ReferenceArea yAxisId="right" y1={0.8} y2={1.3} fill="#00E676" fillOpacity={0.06} />
-                    <Line yAxisId="left" type="monotone" dataKey="acute" stroke="#FFFFFF" strokeWidth={1.5} dot={false} />
-                    <Line yAxisId="left" type="monotone" dataKey="chronic" stroke="#A3A3A3" strokeWidth={1.5} dot={false} />
-                    <Line yAxisId="right" type="monotone" dataKey="acwr" stroke="#CCFF00" strokeWidth={2.5} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              <>
+                {/* Zoom controls */}
+                <div className="flex items-center gap-3 flex-wrap mb-3" data-testid="chart-zoom-controls">
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setVisibleDays((d) => Math.min(detailSeries.length || 60, d + 7))}
+                      className="p-1.5 border border-white/10 text-[#A3A3A3] hover:text-white hover:border-white/30 transition"
+                      data-testid="zoom-out-btn"
+                      title="Zoom out — mostrar mais dias"
+                    ><ZoomOut className="w-3.5 h-3.5" /></button>
+                    <button
+                      type="button"
+                      onClick={() => setVisibleDays((d) => Math.max(7, d - 7))}
+                      className="p-1.5 border border-white/10 text-[#A3A3A3] hover:text-white hover:border-white/30 transition"
+                      data-testid="zoom-in-btn"
+                      title="Zoom in — mostrar menos dias"
+                    ><ZoomIn className="w-3.5 h-3.5" /></button>
+                  </div>
+                  <input
+                    type="range"
+                    min={7}
+                    max={detailSeries.length || 60}
+                    step={1}
+                    value={Math.min(visibleDays, detailSeries.length || 60)}
+                    onChange={(e) => setVisibleDays(Number(e.target.value))}
+                    className="flex-1 min-w-[120px] max-w-[240px] accent-[#CCFF00]"
+                    data-testid="zoom-slider"
+                    title="Arrasta para ajustar os dias visíveis"
+                  />
+                  <div className="flex gap-1 flex-wrap">
+                    {[7, 14, 30, 60].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setVisibleDays(preset)}
+                        className={`px-2 py-1 text-[10px] font-head font-bold uppercase tracking-widest border transition ${
+                          visibleDays === preset
+                            ? "border-[#CCFF00] text-[#CCFF00] bg-[#CCFF00]/10"
+                            : "border-white/10 text-[#A3A3A3] hover:text-white hover:border-white/30"
+                        }`}
+                        data-testid={`zoom-preset-${preset}`}
+                      >{preset}D</button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setVisibleDays(detailSeries.length || 60)}
+                      className={`px-2 py-1 text-[10px] font-head font-bold uppercase tracking-widest border transition ${
+                        visibleDays >= (detailSeries.length || 60)
+                          ? "border-[#CCFF00] text-[#CCFF00] bg-[#CCFF00]/10"
+                          : "border-white/10 text-[#A3A3A3] hover:text-white hover:border-white/30"
+                      }`}
+                      data-testid="zoom-preset-all"
+                    >TUDO</button>
+                  </div>
+                  <span className="text-[10px] uppercase tracking-widest text-[#525252] ml-auto">
+                    {Math.min(visibleDays, detailSeries.length)} dias
+                  </span>
+                </div>
+                <div className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={detailSeries.slice(-Math.min(visibleDays, detailSeries.length))} margin={{ top: 10, right: 10, bottom: 0, left: -10 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" tick={{ fill: "#525252", fontSize: 10 }} tickFormatter={(v) => v.slice(5)} />
+                      <YAxis yAxisId="left" tick={{ fill: "#525252", fontSize: 10 }} />
+                      <YAxis yAxisId="right" orientation="right" tick={{ fill: "#CCFF00", fontSize: 10 }} domain={[0, 2]} />
+                      <Tooltip contentStyle={{ background: "#141414", border: "1px solid rgba(255,255,255,0.15)" }} labelStyle={{ color: "#CCFF00" }} />
+                      <ReferenceArea yAxisId="right" y1={0.8} y2={1.3} fill="#00E676" fillOpacity={0.06} />
+                      <Line yAxisId="left" type="monotone" dataKey="acute" stroke="#FFFFFF" strokeWidth={1.5} dot={false} />
+                      <Line yAxisId="left" type="monotone" dataKey="chronic" stroke="#A3A3A3" strokeWidth={1.5} dot={false} />
+                      <Line yAxisId="right" type="monotone" dataKey="acwr" stroke="#CCFF00" strokeWidth={2.5} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
             )}
           </div>
 

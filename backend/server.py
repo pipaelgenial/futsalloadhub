@@ -2183,11 +2183,16 @@ def _team_metrics_from_daily(by_day: dict, ref_date: Optional[date] = None,
 
 
 @api.get("/analytics/team-detailed")
-async def team_detailed(exclude_injured: bool = False, user=Depends(get_current_user)):
+async def team_detailed(
+    exclude_injured: bool = False,
+    exclude_athlete_ids: Optional[str] = None,
+    user=Depends(get_current_user),
+):
     """Team-wide ACWR series & metrics computed from average per-athlete daily load.
 
     exclude_injured: when True, athletes with is_injured=True are removed from
     both the pool count and the daily load sum. Default False (include everyone).
+    exclude_athlete_ids: comma-separated athlete IDs to exclude from the aggregation.
     """
     team = await _get_active_team(user, required=False)
     if team:
@@ -2199,13 +2204,19 @@ async def team_detailed(exclude_injured: bool = False, user=Depends(get_current_
         return {"team": team, "metrics": None, "series": []}
 
     injured_ids = {a["id"] for a in athletes if a.get("is_injured")}
+    excluded_manual = set()
+    if exclude_athlete_ids:
+        excluded_manual = {x.strip() for x in exclude_athlete_ids.split(",") if x.strip()}
+    excluded = set(excluded_manual)
     if exclude_injured:
-        active_athletes = [a for a in athletes if not a.get("is_injured")]
-    else:
-        active_athletes = athletes
+        excluded |= injured_ids
+    active_athletes = [a for a in athletes if a["id"] not in excluded]
     if not active_athletes:
         return {"team": team, "metrics": None, "series": [], "n_athletes": 0,
-                "excluded_injured": len(injured_ids), "exclude_injured": exclude_injured}
+                "excluded_injured": len(injured_ids & excluded),
+                "excluded_manual": len(excluded_manual),
+                "exclude_injured": exclude_injured,
+                "injured_count": len(injured_ids)}
 
     active_ids = {a["id"] for a in active_athletes}
     sessions = await db.sessions.find(
@@ -2252,7 +2263,7 @@ async def team_detailed(exclude_injured: bool = False, user=Depends(get_current_
             "acwr": acwr,
         })
 
-    return {"team": team, "metrics": metrics, "series": series, "n_athletes": n_athletes, "acwr_method": method, "excluded_injured": len(injured_ids), "exclude_injured": exclude_injured, "injured_count": len(injured_ids)}
+    return {"team": team, "metrics": metrics, "series": series, "n_athletes": n_athletes, "acwr_method": method, "excluded_injured": len(injured_ids & excluded), "excluded_manual": len(excluded_manual), "exclude_injured": exclude_injured, "injured_count": len(injured_ids)}
 
 
 @api.get("/analytics/weekly/team/overview")
@@ -3078,6 +3089,276 @@ async def export_sessions_csv(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+# ---------------------- Team CSV Backup (export + import) ----------------------
+# Columns are semicolon-separated (Portuguese locale friendly), UTF-8 with BOM.
+BACKUP_ATHLETE_HEADERS = ["id", "nome", "posicao", "dorsal", "data_nascimento", "lesionado"]
+BACKUP_SESSION_HEADERS = [
+    "atleta_id", "atleta_nome", "data", "tipo",
+    "rpe", "duracao_min", "carga", "sono", "bem_estar", "notas",
+]
+
+BACKUP_TYPE_TO_PT = {"training": "treino", "match": "jogo", "gym": "ginasio", "recovery": "recuperacao", "rest": "folga", "injury": "lesao"}
+BACKUP_TYPE_FROM_PT = {v: k for k, v in BACKUP_TYPE_TO_PT.items()}
+
+
+@api.get("/export/team-backup.zip")
+async def export_team_backup(user=Depends(get_current_user)):
+    """Coach downloads a ZIP with atletas.csv + sessoes.csv for the active team.
+
+    The ZIP can later be re-uploaded to `/api/import/team-backup` to restore or
+    migrate the data to another account/team.
+    """
+    if user.get("role") != "coach":
+        raise HTTPException(403, "Apenas treinadores podem exportar")
+    team = await _get_team_or_404(user)
+    athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).sort("name", 1).to_list(500)
+    sessions = await db.sessions.find({"team_id": team["id"]}, {"_id": 0}).sort("date", 1).to_list(50000)
+    a_map = {a["id"]: a for a in athletes}
+
+    # Build athletes CSV
+    a_buf = io.StringIO()
+    a_buf.write("\ufeff")
+    aw = _csv.writer(a_buf, delimiter=";")
+    aw.writerow(BACKUP_ATHLETE_HEADERS)
+    for a in athletes:
+        aw.writerow([
+            a.get("id", ""),
+            a.get("name", ""),
+            a.get("position", "") or "",
+            a.get("jersey_number", "") if a.get("jersey_number") is not None else "",
+            a.get("birth_date", "") or "",
+            "sim" if a.get("is_injured") else "nao",
+        ])
+
+    # Build sessions CSV
+    s_buf = io.StringIO()
+    s_buf.write("\ufeff")
+    sw = _csv.writer(s_buf, delimiter=";")
+    sw.writerow(BACKUP_SESSION_HEADERS)
+    for s in sessions:
+        a = a_map.get(s["athlete_id"], {})
+        sw.writerow([
+            s.get("athlete_id", ""),
+            a.get("name", ""),
+            s.get("date", ""),
+            BACKUP_TYPE_TO_PT.get(s.get("session_type", "training"), s.get("session_type", "training")),
+            s.get("rpe", 0) or 0,
+            s.get("duration_min", 0) or 0,
+            s.get("load", 0) or 0,
+            s.get("sleep_quality", "") if s.get("sleep_quality") is not None else "",
+            s.get("wellness", "") if s.get("wellness") is not None else "",
+            (s.get("notes") or "").replace("\n", " "),
+        ])
+
+    import zipfile as _zipfile
+    zip_buf = io.BytesIO()
+    with _zipfile.ZipFile(zip_buf, "w", _zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("atletas.csv", a_buf.getvalue())
+        zf.writestr("sessoes.csv", s_buf.getvalue())
+    zip_buf.seek(0)
+
+    safe_team = "".join(c if c.isalnum() else "_" for c in team["name"])[:40]
+    today_iso = date.today().isoformat()
+    fname = f"backup_{safe_team}_{today_iso}.zip"
+    return StreamingResponse(
+        iter([zip_buf.getvalue()]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+def _parse_backup_csv(raw: bytes) -> list:
+    """Parse a UTF-8 (optionally BOM-prefixed) semicolon-separated CSV into
+    a list of dicts. Uses the first row as headers.
+    """
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = _csv.DictReader(io.StringIO(text), delimiter=";")
+    return list(reader)
+
+
+@api.post("/import/team-backup")
+async def import_team_backup(
+    mode: str = "merge",
+    file: UploadFile = File(...),
+    user=Depends(get_current_user),
+):
+    """Coach uploads a ZIP produced by `/api/export/team-backup.zip` to restore
+    athletes + sessions into the active team.
+
+    mode:
+      - 'merge' (default): keep existing athletes/sessions; only add rows that
+        don't collide (athlete name+jersey; session athlete+date+type).
+      - 'replace': wipe existing athletes + sessions of the active team first.
+    """
+    if user.get("role") != "coach":
+        raise HTTPException(403, "Apenas treinadores podem importar")
+    team = await _get_team_or_404(user)
+    if mode not in ("merge", "replace"):
+        raise HTTPException(400, "mode inválido (use merge ou replace)")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Ficheiro vazio")
+
+    # Accept a ZIP with atletas.csv + sessoes.csv OR a single CSV (sessions).
+    import zipfile as _zipfile
+    a_rows: List[dict] = []
+    s_rows: List[dict] = []
+    fname = (file.filename or "").lower()
+    try:
+        if fname.endswith(".zip") or raw[:2] == b"PK":
+            with _zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                names = {n.lower(): n for n in zf.namelist()}
+                if "atletas.csv" in names:
+                    a_rows = _parse_backup_csv(zf.read(names["atletas.csv"]))
+                if "sessoes.csv" in names:
+                    s_rows = _parse_backup_csv(zf.read(names["sessoes.csv"]))
+                if not a_rows and not s_rows:
+                    raise HTTPException(400, "ZIP não contém atletas.csv nem sessoes.csv")
+        else:
+            # Assume it's a single CSV — try to detect header
+            rows = _parse_backup_csv(raw)
+            if rows and "atleta_id" in rows[0]:
+                s_rows = rows
+            elif rows and ("nome" in rows[0] or "name" in rows[0]):
+                a_rows = rows
+            else:
+                raise HTTPException(400, "CSV desconhecido — envia um ZIP gerado pela app")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Não consegui ler o ficheiro: {e}")
+
+    # Optional wipe
+    if mode == "replace":
+        await db.sessions.delete_many({"team_id": team["id"]})
+        await db.athletes.delete_many({"team_id": team["id"]})
+        await db.injuries.delete_many({"team_id": team["id"]})
+
+    # Rebuild athletes (id from CSV is used when creating new to keep session
+    # references valid). We map both by import-id and by name (case insensitive).
+    existing_athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).to_list(500)
+    by_id = {a["id"]: a for a in existing_athletes}
+    by_name = {(a.get("name") or "").strip().lower(): a for a in existing_athletes}
+
+    athletes_created = 0
+    athletes_matched = 0
+    id_remap: dict = {}
+    for r in a_rows:
+        src_id = (r.get("id") or "").strip()
+        name = (r.get("nome") or r.get("name") or "").strip()
+        if not name:
+            continue
+        # Match preference: (1) same id in this team, (2) same name in this team.
+        existing = by_id.get(src_id) or by_name.get(name.lower())
+        if existing:
+            id_remap[src_id] = existing["id"]
+            athletes_matched += 1
+            continue
+        # Create new — reuse src_id when possible to preserve session links
+        new_id = src_id if src_id and src_id not in by_id else str(uuid.uuid4())
+        jersey_raw = (r.get("dorsal") or "").strip()
+        try:
+            jersey = int(jersey_raw) if jersey_raw else None
+        except ValueError:
+            jersey = None
+        is_injured = (r.get("lesionado") or "").strip().lower() in ("sim", "yes", "true", "1")
+        doc = {
+            "id": new_id,
+            "team_id": team["id"],
+            "name": name,
+            "position": (r.get("posicao") or r.get("position") or "").strip() or None,
+            "jersey_number": jersey,
+            "birth_date": (r.get("data_nascimento") or r.get("birth_date") or "").strip() or None,
+            "is_injured": is_injured,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.athletes.insert_one(doc)
+        by_id[new_id] = doc
+        by_name[name.lower()] = doc
+        id_remap[src_id] = new_id
+        athletes_created += 1
+
+    # Sessions
+    sessions_created = 0
+    sessions_skipped = 0
+    for r in s_rows:
+        src_aid = (r.get("atleta_id") or "").strip()
+        aid = id_remap.get(src_aid) or (by_id.get(src_aid) or {}).get("id")
+        if not aid:
+            # try by name
+            aname = (r.get("atleta_nome") or "").strip().lower()
+            aid = (by_name.get(aname) or {}).get("id") if aname else None
+        if not aid:
+            sessions_skipped += 1
+            continue
+        date_str = (r.get("data") or "").strip()
+        if not date_str:
+            sessions_skipped += 1
+            continue
+        stype_raw = (r.get("tipo") or "training").strip().lower()
+        stype = BACKUP_TYPE_FROM_PT.get(stype_raw, stype_raw)
+        if stype not in VALID_SESSION_TYPES:
+            stype = "training"
+        try:
+            rpe = int(float(r.get("rpe") or 0))
+            duration = int(float(r.get("duracao_min") or 0))
+        except ValueError:
+            sessions_skipped += 1
+            continue
+        try:
+            load = int(float(r.get("carga") or (rpe * duration)))
+        except ValueError:
+            load = rpe * duration
+        sleep_raw = (r.get("sono") or "").strip()
+        well_raw = (r.get("bem_estar") or "").strip()
+        try:
+            sleep_q = int(float(sleep_raw)) if sleep_raw else None
+        except ValueError:
+            sleep_q = None
+        try:
+            wellness = int(float(well_raw)) if well_raw else None
+        except ValueError:
+            wellness = None
+
+        # In merge mode, skip if the same athlete already has a session for
+        # this date+type (deterministic dedupe key).
+        if mode == "merge":
+            dup = await db.sessions.find_one({
+                "team_id": team["id"],
+                "athlete_id": aid,
+                "date": date_str,
+                "session_type": stype,
+            })
+            if dup:
+                sessions_skipped += 1
+                continue
+        doc = {
+            "id": str(uuid.uuid4()),
+            "athlete_id": aid,
+            "team_id": team["id"],
+            "date": date_str,
+            "rpe": rpe,
+            "duration_min": duration,
+            "sleep_quality": sleep_q,
+            "wellness": wellness,
+            "session_type": stype,
+            "load": load,
+            "notes": (r.get("notas") or "").strip() or None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.sessions.insert_one(doc)
+        sessions_created += 1
+
+    return {
+        "ok": True,
+        "mode": mode,
+        "athletes_created": athletes_created,
+        "athletes_matched": athletes_matched,
+        "sessions_created": sessions_created,
+        "sessions_skipped": sessions_skipped,
+    }
 
 
 def _build_summary_pdf(*, title: str, athlete_name: str, team_name: str, period_label: str, rows: list, headers: list, evolution: str, evolution_pct: float) -> bytes:
