@@ -1,0 +1,22 @@
+{
+  "summary": "Verified fix for 500 error in weekly/monthly PDF export endpoints. Root cause: `.get(k, 0)` returns None when key exists but value is None (empty-period case in weekly_summary/monthly_summary), and f'{None:.0f}' raises TypeError. Fix applied via `(v.get(k) or 0)` pattern plus try/except wrapper and ASCII slug filename. Wrote 10 pytest cases covering: all 8 demo athletes via weekly + monthly endpoints, a freshly-created athlete with ZERO sessions (reproduces the exact None-value crash), ASCII-only Content-Disposition for accented names, player 403 for both endpoints, and quick regressions on athlete full-report, team full-report, and team-backup zip. All 10 tests PASSED.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration17_weekly_monthly_pdf.py",
+    "/app/test_reports/pytest/iteration17.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now ~4315 lines — well past the 700-line guideline. Strongly recommend splitting into routers/services (exports, analytics, auth, etc.) for maintainability.",
+    "The `(v.get(k) or 0)` idiom is applied ad-hoc; consider centralising numeric-coercion for report rows (helper like `_fmt_num(v, spec)`), because the same class of bug can recur elsewhere (e.g., delta calculations, evolution_pct upstream)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "N/A"},
+  "test_credentials": "Coach treinador@futsal.pt/treinador123, Player jogador1@futsal.pt/jogador123",
+  "seed_data_creation": "Created and cleaned up a temporary athlete 'TEST_ZeroSessions Athlete' with zero sessions to reproduce the empty-period None crash.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 17 tests are in /app/backend/tests/test_iteration17_weekly_monthly_pdf.py. Note: pytest requires REACT_APP_BACKEND_URL to be exported before invocation (all backend test files fail collection otherwise). Consider adding a shared conftest.py that reads /app/frontend/.env into env.",
+  "rca of the issue": "Empty week/month buckets returned {avg_load: None, avg_sleep: None, avg_wellness: None}. The export code used `w.get('avg_load', 0)` which returns None (not 0) when the key is present with None value; passing None to f'{x:.0f}' raises TypeError. Fixed by replacing default-get with `(w.get('avg_load') or 0)` in export_weekly_pdf and export_monthly_pdf, plus try/except → HTTPException(500) with diagnostic and ASCII slug filename. Verified via a synthetic zero-sessions athlete."
+}

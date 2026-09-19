@@ -217,6 +217,15 @@ e estilo dashboard.
 - Tema: Performance Pro dark (#0A0A0A) + accent volt yellow (#CCFF00),
   Barlow Condensed (headers) + Manrope (body) + JetBrains Mono (números)
 
+## Phase 20 — Bug fix: 500 nos PDFs semanal/mensal (19 Set 2026)
+- **BUG FIX**: `GET /api/export/weekly/{id}.pdf` e `.../monthly/{id}.pdf` retornavam 500
+  quando o atleta tinha semanas/meses sem sessões. Causa: `w.get("avg_load", 0)`
+  devolve `None` (não `0`) quando a chave existe com valor `None`, e
+  `f'{None:.0f}'` lança `TypeError`. Fix: `(w.get("avg_load") or 0):.0f` em ambos
+  os endpoints; try/except com `logging.exception` → HTTPException 500 com detalhe
+  em vez de crash silencioso; filename passou a usar `_ascii_slug` para consistência
+  com iter 15.
+
 ## Phase 19 — Signature, Team PDF, Sleep/Wellness chart, NETWORK ERROR fix (19 Set 2026)
 - **BUG FIX**: `GET /api/export/athlete/{id}/full-report.pdf` já não devolve NETWORK ERROR
   para nomes com acento (ex: André, João). Causa: caracteres não-ASCII no header
