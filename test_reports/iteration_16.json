@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 16 verification: coach signature + coach_name + team full-report PDF + Sono/Bem-estar chart. 10/10 new backend tests pass + 7/7 iteration 15 regression tests pass. Frontend flows fully verified: /equipa PDF DA EQUIPA downloads a valid multi-page PDF (equipa_Sporting_Futsal_Lisboa_2026-09-19.pdf, ASCII filename, %PDF magic), edit form exposes data-testid='team-coach-name' pre-filled with 'Pedro Pipa', signature upload/preview/remove UI works (upload-signature-{id}, team-signature-preview-{id}, remove-signature-{id}), coach name 'Treinador: Pedro Pipa' displayed on team card. /atletas/{id} shows 'SONO & BEM-ESTAR (60 DIAS)' section (data-testid='sleep-wellness-chart') with two Recharts lines and dual Y axes (1-5 Sono left, 1-10 Bem-estar right), data points visible on demo data. Athlete PDF contains 'ASSINADO POR' block + 'Pedro Pipa' coach name (verified via pypdf text extraction). Team full PDF has >= (1 + N) pages for N athletes. Player role gets 403 on both /api/teams/{id}/signature (upload) and /api/export/team/full-report.pdf. 2MB file-size limit enforced on signature upload. ASCII-only Content-Disposition preserved for both athlete and team PDFs (regression from it15).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration16_signature_teampdf.py",
+    "/app/backend/tests/test_athlete_pdf_export.py",
+    "/app/test_reports/pytest/iteration16.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now ~4300 lines — the split into modules (auth/teams/export/analytics) is overdue.",
+    "PUT /api/teams/{id} still requires the full TeamIn body (name/escalao/epoca) even for a partial update like coach_name — consider a TeamPatch model with all-Optional fields for a friendlier API.",
+    "Team full-PDF endpoint silently skips broken athlete sections (logging.exception) but never surfaces which athletes failed to the caller; consider returning a small warnings JSON header or including a failure list on the cover page.",
+    "Signature 2 MB limit check should ideally happen before reading the whole body into memory (currently reads then rejects); low priority."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration16_signature_teampdf.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "coach treinador@futsal.pt / treinador123; player jogador1@futsal.pt / jogador123",
+  "seed_data_creation": "None. Restored coach_name='Pedro Pipa' and re-uploaded a 1x1 PNG signature at end of tests to match the pre-existing state.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All iteration 16 features working end-to-end. New pytest module at /app/backend/tests/test_iteration16_signature_teampdf.py (10 tests) plus regression at test_athlete_pdf_export.py (7 tests) both green. The active team may retain TEST fields from the coach_name test (test cleans up to 'Pedro Pipa'). PDF DA EQUIPA takes ~5-8s server-side to merge 8 athlete PDFs; use timeout>=60s.",
+  "rca of the issue": "N/A — no bugs found."
+}

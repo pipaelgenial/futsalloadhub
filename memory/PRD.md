@@ -217,6 +217,26 @@ e estilo dashboard.
 - Tema: Performance Pro dark (#0A0A0A) + accent volt yellow (#CCFF00),
   Barlow Condensed (headers) + Manrope (body) + JetBrains Mono (números)
 
+## Phase 19 — Signature, Team PDF, Sleep/Wellness chart, NETWORK ERROR fix (19 Set 2026)
+- **BUG FIX**: `GET /api/export/athlete/{id}/full-report.pdf` já não devolve NETWORK ERROR
+  para nomes com acento (ex: André, João). Causa: caracteres não-ASCII no header
+  `Content-Disposition` são rejeitados pela Cloudflare/browser → axios reporta
+  NETWORK ERROR antes de expor o status HTTP. Fix: `_ascii_slug()` normaliza o
+  nome do ficheiro para ASCII; `_pdf_safe()` faz html-escape a todo o texto
+  interpolado em `Paragraph` para evitar parsing quebrado; endpoint envolvido em
+  try/except com `logging.exception` para reportar 500 com detalhe em vez de hang.
+- **Gráfico Sono + Bem-estar** (60 dias) na ficha do atleta com duas linhas
+  em eixos duais: Sono 1-5 verde à esquerda, Bem-estar 1-10 lime à direita.
+- **PDF completo da equipa**: novo endpoint `GET /api/export/team/full-report.pdf`
+  gera capa (logo + plantel) + registo completo de cada atleta (uma secção por atleta),
+  merged com `pypdf`. Botão **"PDF DA EQUIPA"** em `/equipa`.
+- **Assinatura digital do treinador**: novos endpoints
+  `POST/DELETE/GET /api/teams/{id}/signature` (multipart upload de PNG transparente ≤ 2 MB,
+  guardado em base64 no documento da equipa). Campo `coach_name` adicionado ao
+  `TeamIn` para o carimbo. Todos os PDFs exportados (atleta + equipa) mostram
+  um bloco "ASSINADO POR" com a assinatura + nome do treinador + carimbo com ID
+  do documento e timestamp UTC.
+
 ## Phase 18 — PDF completo do atleta (12 Set 2026)
 - Novo endpoint `GET /api/export/athlete/{id}/full-report.pdf` (só coach) que gera
   um PDF **dark theme** (fundo #0A0A0A, accent lime #CCFF00) partilhável via URL.
