@@ -222,6 +222,96 @@ export default function AthleteDetail() {
         )}
       </div>
 
+      {/* Sleep + Wellness chart (60 days) */}
+      {(() => {
+        // Build a daily series (last 60 days) with sleep_quality & wellness
+        // averaged across any sessions that day. If no session on a day → gap.
+        const map = new Map();
+        for (const s of sessions) {
+          if (!s.date) continue;
+          const key = s.date;
+          const bucket = map.get(key) || { sleep: [], well: [] };
+          if (s.sleep_quality != null) bucket.sleep.push(s.sleep_quality);
+          if (s.wellness != null) bucket.well.push(s.wellness);
+          map.set(key, bucket);
+        }
+        const today = new Date();
+        const days = [];
+        for (let i = 59; i >= 0; i--) {
+          const d = new Date(today); d.setDate(d.getDate() - i);
+          const iso = d.toISOString().slice(0, 10);
+          const b = map.get(iso);
+          const avg = (arr) => (arr && arr.length ? arr.reduce((a, x) => a + x, 0) / arr.length : null);
+          days.push({ date: iso, sleep: avg(b?.sleep), wellness: avg(b?.well) });
+        }
+        const hasAny = days.some((d) => d.sleep != null || d.wellness != null);
+        return (
+          <div className="fld-card" data-testid="sleep-wellness-chart">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <div className="font-head text-2xl font-bold">SONO & BEM-ESTAR (60 DIAS)</div>
+              <div className="text-xs text-[#A3A3A3] flex gap-4">
+                <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-[#00E676] inline-block" /> Sono (1-5)</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-[#CCFF00] inline-block" /> Bem-estar (1-10)</span>
+              </div>
+            </div>
+            {!hasAny ? (
+              <div className="py-12 text-center text-sm text-[#525252]" data-testid="sleep-wellness-empty">
+                Sem registos de sono/bem-estar nos últimos 60 dias.
+              </div>
+            ) : (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={days} margin={{ top: 10, right: 10, bottom: 0, left: -10 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" tick={{ fill: "#525252", fontSize: 10 }} tickFormatter={(v) => v.slice(5)} />
+                    <YAxis
+                      yAxisId="sleep"
+                      domain={[1, 5]}
+                      ticks={[1, 2, 3, 4, 5]}
+                      tick={{ fill: "#00E676", fontSize: 10 }}
+                      label={{ value: "Sono", angle: -90, position: "insideLeft", fill: "#00E676", fontSize: 10 }}
+                    />
+                    <YAxis
+                      yAxisId="well"
+                      orientation="right"
+                      domain={[1, 10]}
+                      ticks={[1, 3, 5, 7, 10]}
+                      tick={{ fill: "#CCFF00", fontSize: 10 }}
+                      label={{ value: "Bem-estar", angle: 90, position: "insideRight", fill: "#CCFF00", fontSize: 10 }}
+                    />
+                    <Tooltip
+                      contentStyle={{ background: "#141414", border: "1px solid rgba(255,255,255,0.15)" }}
+                      labelStyle={{ color: "#CCFF00" }}
+                      formatter={(v, name) => [v != null ? Number(v).toFixed(1) : "—", name]}
+                    />
+                    <Line
+                      yAxisId="sleep"
+                      type="monotone"
+                      dataKey="sleep"
+                      name="Sono"
+                      stroke="#00E676"
+                      strokeWidth={2}
+                      dot={{ r: 2 }}
+                      connectNulls
+                    />
+                    <Line
+                      yAxisId="well"
+                      type="monotone"
+                      dataKey="wellness"
+                      name="Bem-estar"
+                      stroke="#CCFF00"
+                      strokeWidth={2}
+                      dot={{ r: 2 }}
+                      connectNulls
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       <InjuriesPanel athleteId={id} refreshKey={injuries.length} onChange={load} />
 
       <div className="fld-card">

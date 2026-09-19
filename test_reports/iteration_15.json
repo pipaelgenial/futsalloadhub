@@ -1,0 +1,25 @@
+{
+  "summary": "Verified fix for 'NETWORK ERROR' bug on athlete PDF export (PDF COMPLETO). 7/7 backend regression tests pass and full frontend flow (login as coach → /atletas → André Lopes → click export-full-pdf-btn) yields HTTP 200 application/pdf, ASCII-only Content-Disposition filename ('registo_Andre_Lopes_2026-09-19.pdf'), the browser triggers a real download, no NETWORK ERROR toast, and the success toast 'PDF gerado' appears.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_athlete_pdf_export.py",
+    "/app/test_reports/pytest/pdf_export.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is >4000 lines — consider splitting into modules (auth, athletes, export, analytics).",
+    "_pdf_safe() html-escapes but does not strip control chars; low risk since names are validated upstream.",
+    "Content-Disposition uses only ASCII filename; RFC 5987 filename*=UTF-8'' variant could be added if user-visible UTF-8 filename in browser is desired (not required for the fix)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_athlete_pdf_export.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "coach treinador@futsal.pt / treinador123; player jogador1@futsal.pt / jogador123",
+  "seed_data_creation": "None (used existing demo seed). Test creates+deletes a temp athlete with HTML-special chars in name.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "PDF export fix verified end-to-end. Test suite at /app/backend/tests/test_athlete_pdf_export.py covers ASCII filename, %PDF magic, HTML-special-char names, all demo athletes, player 403, team backup zip, team-detailed exclude, and 404 for missing athlete.",
+  "rca of the issue": "Original NETWORK ERROR was caused by non-ASCII bytes (e.g. 'é' in 'André') being placed directly into the Content-Disposition header. Some intermediaries (Cloudflare/browsers) reject or corrupt non-ASCII header bytes leading to a client-side generic NETWORK ERROR before any HTTP status is exposed to axios. Fix (_ascii_slug + html-escape via _pdf_safe + try/except → 500) is correct and works. Verified: header is now ASCII-only, endpoint returns 200 application/pdf with valid PDF bytes."
+}

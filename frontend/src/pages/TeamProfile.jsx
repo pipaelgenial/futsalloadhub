@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { http, formatApiError, downloadFile } from "@/lib/api";
 import { toast } from "sonner";
-import { Plus, Trash2, Pencil, Sliders, Download, Upload } from "lucide-react";
+import { Plus, Trash2, Pencil, Sliders, Download, Upload, FileDown, PenTool } from "lucide-react";
 import TeamLogo from "@/components/TeamLogo";
 
 const MAX_TEAMS = 5;
@@ -21,15 +21,45 @@ export default function TeamProfile() {
   const [teams, setTeams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null); // id or "new"
-  const [form, setForm] = useState({ name: "", escalao: "", epoca: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra" });
+  const [form, setForm] = useState({ name: "", escalao: "", epoca: "", coach_name: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra" });
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const fileRef = useRef(null);
+  const sigRef = useRef(null);
 
   async function exportBackup() {
     try {
       await downloadFile("/export/team-backup.zip", "backup.zip");
       toast.success("Backup gerado");
+    } catch (err) { toast.error(formatApiError(err)); }
+  }
+
+  async function exportTeamFullPdf() {
+    try {
+      await downloadFile("/export/team/full-report.pdf", "equipa.pdf");
+      toast.success("PDF da equipa gerado");
+    } catch (err) { toast.error(formatApiError(err)); }
+  }
+
+  async function uploadSignature(teamId, file) {
+    if (!file) return;
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      await http.post(`/teams/${teamId}/signature`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      toast.success("Assinatura guardada");
+      load();
+    } catch (err) { toast.error(formatApiError(err)); }
+  }
+
+  async function removeSignature(teamId) {
+    if (!window.confirm("Remover a assinatura da equipa?")) return;
+    try {
+      await http.delete(`/teams/${teamId}/signature`);
+      toast.success("Assinatura removida");
+      load();
     } catch (err) { toast.error(formatApiError(err)); }
   }
 
@@ -73,7 +103,7 @@ export default function TeamProfile() {
       return;
     }
     setEditing("new");
-    setForm({ name: "", escalao: "", epoca: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra" });
+    setForm({ name: "", escalao: "", epoca: "", coach_name: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra" });
   }
 
   function startEdit(t) {
@@ -82,6 +112,7 @@ export default function TeamProfile() {
       name: t.name,
       escalao: t.escalao,
       epoca: t.epoca,
+      coach_name: t.coach_name || "",
       load_thresholds: t.load_thresholds || { ...DEFAULT_THRESHOLDS },
       acwr_method: t.acwr_method || "ra",
     });
@@ -89,7 +120,7 @@ export default function TeamProfile() {
 
   function cancel() {
     setEditing(null);
-    setForm({ name: "", escalao: "", epoca: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra" });
+    setForm({ name: "", escalao: "", epoca: "", coach_name: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra" });
   }
 
   function setThreshold(key, value) {
@@ -125,6 +156,7 @@ export default function TeamProfile() {
         name: form.name,
         escalao: form.escalao,
         epoca: form.epoca,
+        coach_name: form.coach_name || null,
         acwr_method: form.acwr_method || "ra",
         load_thresholds: {
           ideal: Number(form.load_thresholds.ideal),
@@ -168,6 +200,15 @@ export default function TeamProfile() {
           <p className="text-[#A3A3A3] text-sm mt-2">Até {MAX_TEAMS} equipas com dados independentes</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={exportTeamFullPdf}
+            disabled={teams.length === 0}
+            className="fld-btn-ghost flex items-center gap-2 disabled:opacity-40"
+            data-testid="export-team-pdf-btn"
+            title="Descarregar um PDF com o registo completo de todos os atletas da equipa ativa"
+          >
+            <FileDown className="w-4 h-4" /> PDF DA EQUIPA
+          </button>
           <button
             onClick={exportBackup}
             disabled={teams.length === 0}
@@ -227,6 +268,16 @@ export default function TeamProfile() {
               <label className="fld-label">Época</label>
               <input className="fld-input" value={form.epoca} onChange={(e) => setForm({ ...form, epoca: e.target.value })} required data-testid="team-epoca" placeholder="Ex: 2025/2026" />
             </div>
+          </div>
+          <div>
+            <label className="fld-label">Nome do Treinador (para assinatura nos PDFs)</label>
+            <input
+              className="fld-input"
+              value={form.coach_name}
+              onChange={(e) => setForm({ ...form, coach_name: e.target.value })}
+              data-testid="team-coach-name"
+              placeholder="Ex: Pedro Pipa"
+            />
           </div>
 
           {/* ACWR calculation method */}
@@ -378,6 +429,11 @@ export default function TeamProfile() {
                 <div className="font-head text-lg font-bold truncate">{t.name}</div>
                 <div className="text-xs text-[#A3A3A3] uppercase tracking-widest">{t.escalao}</div>
                 <div className="text-xs text-[#525252] mt-0.5">{t.epoca}</div>
+                {t.coach_name && (
+                  <div className="text-[10px] text-[#A3A3A3] mt-0.5 truncate" title="Treinador (aparece na assinatura dos PDFs)">
+                    Treinador: <span className="text-white">{t.coach_name}</span>
+                  </div>
+                )}
                 <div className="mt-1.5 inline-block text-[9px] font-head font-extrabold uppercase tracking-widest px-1.5 py-0.5 border border-white/10 text-[#A3A3A3]" title="Método de cálculo do ACWR">
                   ACWR: {(t.acwr_method || "ra").toUpperCase()}
                 </div>
@@ -386,6 +442,47 @@ export default function TeamProfile() {
                 <span className="text-[10px] uppercase tracking-widest text-[#CCFF00] border border-[#CCFF00]/40 bg-[#CCFF00]/10 px-2 py-0.5" data-testid={`team-active-${t.id}`}>
                   Ativa
                 </span>
+              )}
+            </div>
+
+            {/* Signature */}
+            <div className="mt-3 pt-3 border-t border-white/5 flex items-center gap-3">
+              {t.signature_updated_at ? (
+                <img
+                  src={`${process.env.REACT_APP_BACKEND_URL}/api/teams/${t.id}/signature?v=${encodeURIComponent(t.signature_updated_at)}`}
+                  alt="Assinatura"
+                  className="h-8 max-w-[100px] object-contain bg-white/5 px-2 py-1 border border-white/10"
+                  data-testid={`team-signature-preview-${t.id}`}
+                />
+              ) : (
+                <div className="h-8 w-[100px] border border-dashed border-white/10 text-[9px] text-[#525252] uppercase tracking-widest flex items-center justify-center">
+                  Sem assinatura
+                </div>
+              )}
+              <label
+                className="fld-btn-ghost text-xs flex items-center gap-1 cursor-pointer"
+                data-testid={`upload-signature-${t.id}`}
+                title="Upload de assinatura (PNG transparente recomendado)"
+              >
+                <PenTool className="w-3.5 h-3.5" />
+                {t.signature_updated_at ? "Substituir" : "Assinatura"}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={(e) => uploadSignature(t.id, e.target.files && e.target.files[0])}
+                />
+              </label>
+              {t.signature_updated_at && (
+                <button
+                  type="button"
+                  onClick={() => removeSignature(t.id)}
+                  className="fld-btn-ghost text-xs text-[#FF3B30] border-[#FF3B30]/30 hover:bg-[#FF3B30]/10 flex items-center"
+                  data-testid={`remove-signature-${t.id}`}
+                  title="Remover a assinatura"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
               )}
             </div>
             <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/5">

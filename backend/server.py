@@ -148,6 +148,7 @@ class TeamIn(BaseModel):
     epoca: str
     load_thresholds: Optional[dict] = None  # {ideal, moderate, high, very_high} per-athlete UA
     acwr_method: Optional[str] = None  # "ra" (rolling avg 1:4) or "ewma"
+    coach_name: Optional[str] = None  # displayed on the signature block of exports
 
 
 DEFAULT_LOAD_THRESHOLDS = {"ideal": 300, "moderate": 600, "high": 900, "very_high": 1200}
@@ -567,6 +568,7 @@ async def create_team(data: TeamIn, user=Depends(get_current_user)):
         "name": data.name,
         "escalao": data.escalao,
         "epoca": data.epoca,
+        "coach_name": (data.coach_name or "").strip() or None,
         "load_thresholds": thresholds,
         "acwr_method": data.acwr_method if data.acwr_method in VALID_ACWR_METHODS else DEFAULT_ACWR_METHOD,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -584,6 +586,8 @@ async def update_team_by_id(team_id: str, data: TeamIn, user=Depends(get_current
     if not existing:
         raise HTTPException(404, "Equipa não encontrada")
     update_fields = {"name": data.name, "escalao": data.escalao, "epoca": data.epoca}
+    if data.coach_name is not None:
+        update_fields["coach_name"] = data.coach_name.strip() or None
     if data.load_thresholds is not None:
         thresholds = _sanitize_thresholds(data.load_thresholds)
         if not thresholds:
@@ -714,6 +718,60 @@ async def get_team_logo(team_id: str):
             mt = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
             return FileResponse(fp, media_type=mt)
     raise HTTPException(404, "Sem logo")
+
+
+# ---------------------- Coach signature (per team) ----------------------
+@api.post("/teams/{team_id}/signature")
+async def upload_team_signature(team_id: str, file: UploadFile = File(...), user=Depends(get_current_user)):
+    """Coach uploads a signature image (PNG preferred, transparent bg) that will
+    be stamped on every exported PDF. Stored in the team document as base64 to
+    survive redeploys (production disk is ephemeral)."""
+    team = await db.teams.find_one({"id": team_id, "user_id": user["id"]})
+    if not team:
+        raise HTTPException(404, "Equipa não encontrada")
+    ext = (file.filename.rsplit(".", 1)[-1] or "").lower() if file.filename else ""
+    if ext not in ALLOWED_IMG_EXT:
+        raise HTTPException(400, "Formato inválido. Use JPG, PNG ou WebP")
+    data = await file.read()
+    if len(data) > 2 * 1024 * 1024:
+        raise HTTPException(400, "Assinatura demasiado grande (máx 2MB)")
+    import base64 as _b64
+    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}[ext]
+    await db.teams.update_one(
+        {"id": team_id},
+        {"$set": {
+            "signature_data_b64": _b64.b64encode(data).decode("ascii"),
+            "signature_mime": mime,
+            "signature_updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    return {"ok": True, "url": f"/api/teams/{team_id}/signature"}
+
+
+@api.delete("/teams/{team_id}/signature")
+async def delete_team_signature(team_id: str, user=Depends(get_current_user)):
+    team = await db.teams.find_one({"id": team_id, "user_id": user["id"]})
+    if not team:
+        raise HTTPException(404, "Equipa não encontrada")
+    await db.teams.update_one({"id": team_id}, {"$set": {
+        "signature_data_b64": None, "signature_mime": None,
+    }})
+    return {"ok": True}
+
+
+@api.get("/teams/{team_id}/signature")
+async def get_team_signature(team_id: str):
+    """Public signature endpoint (same visibility model as the logo)."""
+    from fastapi.responses import Response as _Resp
+    import base64 as _b64
+    team = await db.teams.find_one({"id": team_id})
+    if not team or not team.get("signature_data_b64"):
+        raise HTTPException(404, "Sem assinatura")
+    return _Resp(
+        content=_b64.b64decode(team["signature_data_b64"]),
+        media_type=team.get("signature_mime") or "image/png",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
 
 
 # ---------------------- Athletes ----------------------
@@ -3757,25 +3815,75 @@ def _build_athlete_full_pdf(*, athlete: dict, team: dict, metrics: dict, series:
     ]))
     story.append(st)
 
+    # ---------- Coach signature block ----------
+    story.append(Spacer(1, 24))
+    _append_signature_block(story, team=team, user=None,
+                            Image=Image, Paragraph=Paragraph, Table=Table,
+                            TableStyle=TableStyle, ParagraphStyle=ParagraphStyle,
+                            Drawing=Drawing, Rect=Rect, cm=cm,
+                            LIME=LIME, MUTED=MUTED, DIM=DIM, BG=BG, CARD=CARD,
+                            _pdf_safe=_pdf_safe)
+
     doc.build(story, onFirstPage=_paint_bg, onLaterPages=_paint_bg)
     return buf.getvalue()
 
 
-@api.get("/export/athlete/{athlete_id}/full-report.pdf")
-async def export_athlete_full_pdf(athlete_id: str, user=Depends(get_current_user)):
-    """Coach exports a shareable dark-themed PDF with the athlete's complete record."""
-    if user.get("role") != "coach":
-        raise HTTPException(403, "Apenas treinadores podem exportar")
-    team = await _get_team_or_404(user)
-    athlete = await db.athletes.find_one({"id": athlete_id, "team_id": team["id"]}, {"_id": 0})
-    if not athlete:
-        raise HTTPException(404, "Atleta não encontrado")
-    sessions = await db.sessions.find({"athlete_id": athlete_id}, {"_id": 0}).sort("date", 1).to_list(20000)
+def _append_signature_block(story, *, team, user=None, Image, Paragraph, Table,
+                            TableStyle, ParagraphStyle, Drawing, Rect, cm,
+                            LIME, MUTED, DIM, BG, CARD, _pdf_safe):
+    """Adds a `Assinado por: <coach>` block with the uploaded signature (if any).
+    Placed at the bottom of any exported PDF to give visual authenticity."""
+    import base64 as _b64
+    sig_flow = None
+    b64 = team.get("signature_data_b64")
+    if b64:
+        try:
+            sig_flow = Image(io.BytesIO(_b64.b64decode(b64)), width=4.5 * cm, height=1.8 * cm, kind="proportional")
+        except Exception:
+            sig_flow = None
+
+    label_style = ParagraphStyle("sig_lbl", fontName="Helvetica-Bold", fontSize=7,
+                                 textColor=MUTED, leading=9, spaceAfter=2)
+    name_style = ParagraphStyle("sig_nm", fontName="Helvetica-Bold", fontSize=10,
+                                textColor=LIME, leading=13)
+    meta_style = ParagraphStyle("sig_mt", fontName="Helvetica", fontSize=7,
+                                textColor=DIM, leading=9)
+
+    coach_name = _pdf_safe(team.get("coach_name") or (user or {}).get("name") or "Treinador")
+    stamp_text = f'Documento gerado em {datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M")} UTC · ID {uuid.uuid4().hex[:8].upper()}'
+
+    if sig_flow is None:
+        # Placeholder line where the coach can sign by hand if needed
+        placeholder = Drawing(4.5 * cm, 1.8 * cm)
+        placeholder.add(Rect(0, 0, 4.5 * cm, 1.8 * cm, fillColor=CARD, strokeColor=DIM, strokeWidth=0.5))
+        sig_flow = placeholder
+
+    right_cell = [
+        Paragraph("ASSINADO POR", label_style),
+        Paragraph(coach_name, name_style),
+        Paragraph(_pdf_safe(f'{team.get("name","")} · Época {team.get("epoca","")}'), meta_style),
+        Paragraph(stamp_text, meta_style),
+    ]
+
+    tbl = Table([[sig_flow, right_cell]], colWidths=[5 * cm, None])
+    tbl.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+        ("LINEABOVE", (1, 0), (1, 0), 0.5, DIM),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (1, 0), (1, 0), 4),
+    ]))
+    story.append(tbl)
+
+
+async def _prepare_athlete_pdf_data(athlete: dict, team: dict):
+    """Load sessions, metrics, ACWR series and injuries for one athlete. Shared
+    by the single-athlete PDF endpoint and the team roll-up PDF."""
+    sessions = await db.sessions.find({"athlete_id": athlete["id"]}, {"_id": 0}).sort("date", 1).to_list(20000)
     method = team.get("acwr_method") or DEFAULT_ACWR_METHOD
     metrics = compute_metrics_for_athlete(sessions, method=method)
     metrics["acwr_method"] = method
 
-    # ACWR series for the chart (last 60 days)
     ref = date.today()
     by_day = defaultdict(float)
     by_day_adj = defaultdict(float)
@@ -3801,8 +3909,21 @@ async def export_athlete_full_pdf(athlete_id: str, user=Depends(get_current_user
         })
 
     injuries = await db.injuries.find(
-        {"team_id": team["id"], "athlete_id": athlete_id}, {"_id": 0},
+        {"team_id": team["id"], "athlete_id": athlete["id"]}, {"_id": 0},
     ).sort("start_date", -1).to_list(500)
+    return sessions, metrics, series, injuries
+
+
+@api.get("/export/athlete/{athlete_id}/full-report.pdf")
+async def export_athlete_full_pdf(athlete_id: str, user=Depends(get_current_user)):
+    if user.get("role") != "coach":
+        raise HTTPException(403, "Apenas treinadores podem exportar")
+    team = await _get_team_or_404(user)
+    athlete = await db.athletes.find_one({"id": athlete_id, "team_id": team["id"]}, {"_id": 0})
+    if not athlete:
+        raise HTTPException(404, "Atleta não encontrado")
+
+    sessions, metrics, series, injuries = await _prepare_athlete_pdf_data(athlete, team)
 
     try:
         pdf_bytes = _build_athlete_full_pdf(
@@ -3822,6 +3943,168 @@ async def export_athlete_full_pdf(athlete_id: str, user=Depends(get_current_user
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+@api.get("/export/team/full-report.pdf")
+async def export_team_full_pdf(user=Depends(get_current_user)):
+    """Coach exports the FULL team report: one section per athlete (same layout as
+    the single-athlete PDF), merged into a single PDF."""
+    if user.get("role") != "coach":
+        raise HTTPException(403, "Apenas treinadores podem exportar")
+    team = await _get_team_or_404(user)
+    athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).sort("name", 1).to_list(500)
+    if not athletes:
+        raise HTTPException(400, "A equipa não tem atletas ainda")
+
+    try:
+        cover_bytes = _build_team_cover_pdf(team=team, athletes=athletes)
+    except Exception as e:
+        logging.exception("Falha a gerar capa do PDF da equipa")
+        raise HTTPException(500, f"Erro a gerar capa: {type(e).__name__}: {e}")
+
+    from pypdf import PdfReader, PdfWriter
+    writer = PdfWriter()
+    # Cover
+    for pg in PdfReader(io.BytesIO(cover_bytes)).pages:
+        writer.add_page(pg)
+    # One athlete PDF per section
+    for athlete in athletes:
+        try:
+            sessions, metrics, series, injuries = await _prepare_athlete_pdf_data(athlete, team)
+            pdf_bytes = _build_athlete_full_pdf(
+                athlete=athlete, team=team, metrics=metrics,
+                series=series, sessions=sessions, injuries=injuries,
+            )
+            for pg in PdfReader(io.BytesIO(pdf_bytes)).pages:
+                writer.add_page(pg)
+        except Exception:
+            logging.exception("Falha a incluir atleta %s no PDF da equipa", athlete.get("id"))
+            # Skip broken athlete pages but keep going
+
+    out = io.BytesIO()
+    writer.write(out)
+    out.seek(0)
+
+    ascii_name = _ascii_slug(team.get("name") or "equipa")
+    fname = f"equipa_{ascii_name}_{date.today().isoformat()}.pdf"
+    return StreamingResponse(
+        iter([out.getvalue()]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+def _build_team_cover_pdf(*, team: dict, athletes: list) -> bytes:
+    """Cover page for the team full report — dark theme, list of athletes + team info."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import (Image, Paragraph, SimpleDocTemplate, Spacer,
+                                    Table, TableStyle)
+    from reportlab.graphics.shapes import Drawing, Rect
+    import base64 as _b64
+
+    BG = colors.HexColor("#0A0A0A")
+    CARD = colors.HexColor("#141414")
+    LIME = colors.HexColor("#CCFF00")
+    WHITE = colors.HexColor("#FFFFFF")
+    MUTED = colors.HexColor("#A3A3A3")
+    DIM = colors.HexColor("#525252")
+
+    def _paint_bg(canvas, doc_):
+        canvas.saveState()
+        canvas.setFillColor(BG)
+        canvas.rect(0, 0, A4[0], A4[1], stroke=0, fill=1)
+        canvas.setFillColor(LIME)
+        canvas.rect(0, A4[1] - 4, A4[0], 4, stroke=0, fill=1)
+        canvas.setFillColor(DIM)
+        canvas.setFont("Helvetica", 7)
+        canvas.drawRightString(
+            A4[0] - 2 * cm, 1.2 * cm,
+            f"FUTSAL LOAD HUB · Gerado {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M')} UTC",
+        )
+        canvas.drawString(2 * cm, 1.2 * cm, "RELATÓRIO COMPLETO DA EQUIPA")
+        canvas.restoreState()
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=1.6 * cm, rightMargin=1.6 * cm,
+        topMargin=1.4 * cm, bottomMargin=1.8 * cm,
+    )
+    p_kicker = ParagraphStyle("k", fontName="Helvetica-Bold", fontSize=8, textColor=LIME, leading=10, spaceAfter=6)
+    p_title = ParagraphStyle("t", fontName="Helvetica-Bold", fontSize=30, leading=32, textColor=WHITE, spaceAfter=4)
+    p_meta = ParagraphStyle("m", fontName="Helvetica", fontSize=10, textColor=MUTED, leading=14)
+    p_section = ParagraphStyle("sec", fontName="Helvetica-Bold", fontSize=13, leading=16, textColor=WHITE, spaceBefore=18, spaceAfter=8)
+
+    story = []
+    # Logo
+    logo = None
+    if team.get("logo_data_b64"):
+        try:
+            logo = Image(io.BytesIO(_b64.b64decode(team["logo_data_b64"])),
+                         width=4 * cm, height=4 * cm, kind="proportional")
+        except Exception:
+            logo = None
+    if logo is None:
+        logo = Drawing(4 * cm, 4 * cm)
+        logo.add(Rect(0, 0, 4 * cm, 4 * cm, fillColor=CARD, strokeColor=LIME, strokeWidth=1))
+
+    header_lines = [
+        Paragraph("FUTSAL LOAD HUB · RELATÓRIO COMPLETO DA EQUIPA", p_kicker),
+        Paragraph(_pdf_safe((team.get("name") or "—")).upper(), p_title),
+        Paragraph(
+            _pdf_safe(f'{team.get("escalao","")} · Época {team.get("epoca","")} · {len(athletes)} atletas'),
+            p_meta,
+        ),
+    ]
+    head = Table([[logo, header_lines]], colWidths=[4.5 * cm, None])
+    head.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(head)
+    story.append(Spacer(1, 4))
+
+    # Roster table
+    story.append(Paragraph(f"PLANTEL ({len(athletes)})", p_section))
+    rows = [["#", "Atleta", "Posição", "Estado"]]
+    for a in athletes:
+        rows.append([
+            str(a.get("jersey_number") or "—"),
+            _pdf_safe(a.get("name") or "—"),
+            _pdf_safe(a.get("position") or "—"),
+            "Lesionado" if a.get("is_injured") else "Ativo",
+        ])
+    t = Table(rows, colWidths=[1.2 * cm, 6.5 * cm, 5 * cm, 3 * cm], repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), LIME),
+        ("TEXTCOLOR", (0, 0), (-1, 0), BG),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("TEXTCOLOR", (0, 1), (-1, -1), MUTED),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [CARD, colors.HexColor("#1A1A1A")]),
+        ("LINEBELOW", (0, 0), (-1, 0), 1, LIME),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    story.append(t)
+
+    story.append(Spacer(1, 24))
+    _append_signature_block(
+        story, team=team, user=None,
+        Image=Image, Paragraph=Paragraph, Table=Table, TableStyle=TableStyle,
+        ParagraphStyle=ParagraphStyle, Drawing=Drawing, Rect=Rect, cm=cm,
+        LIME=LIME, MUTED=MUTED, DIM=DIM, BG=BG, CARD=CARD, _pdf_safe=_pdf_safe,
+    )
+
+    doc.build(story, onFirstPage=_paint_bg, onLaterPages=_paint_bg)
+    return buf.getvalue()
 
 
 def _build_summary_pdf(*, title: str, athlete_name: str, team_name: str, period_label: str, rows: list, headers: list, evolution: str, evolution_pct: float) -> bytes:
