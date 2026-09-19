@@ -4180,24 +4180,27 @@ async def export_weekly_pdf(athlete_id: str, weeks: int = 8, user=Depends(get_cu
         rows.append([
             w.get("label", w["week"]),
             str(w.get("sessions", 0)),
-            f'{w.get("avg_load", 0):.0f}',
-            f'{w.get("avg_sleep", 0):.1f}' if w.get("avg_sleep") else "—",
-            f'{w.get("avg_wellness", 0):.1f}' if w.get("avg_wellness") else "—",
+            f'{(w.get("avg_load") or 0):.0f}',
+            f'{w["avg_sleep"]:.1f}' if w.get("avg_sleep") else "—",
+            f'{w["avg_wellness"]:.1f}' if w.get("avg_wellness") else "—",
             delta_str,
         ])
     team = await _get_team_or_404(user)
-    pdf_bytes = _build_summary_pdf(
-        title="Resumo Semanal",
-        athlete_name=data["athlete"]["name"],
-        team_name=team["name"],
-        period_label=f"Últimas {weeks} semanas",
-        rows=rows,
-        headers=["Semana", "Sessões", "Carga méd.", "Sono", "Bem-estar", "Δ vs sem. anterior"],
-        evolution=data.get("evolution", "indeterminado"),
-        evolution_pct=data.get("evolution_pct", 0),
-    )
-    safe_name = "".join(c if c.isalnum() else "_" for c in data["athlete"]["name"])[:40]
-    fname = f"semanal_{safe_name}.pdf"
+    try:
+        pdf_bytes = _build_summary_pdf(
+            title="Resumo Semanal",
+            athlete_name=data["athlete"]["name"],
+            team_name=team["name"],
+            period_label=f"Últimas {weeks} semanas",
+            rows=rows,
+            headers=["Semana", "Sessões", "Carga méd.", "Sono", "Bem-estar", "Δ vs sem. anterior"],
+            evolution=data.get("evolution", "indeterminado"),
+            evolution_pct=data.get("evolution_pct") or 0,
+        )
+    except Exception as e:
+        logging.exception("Falha a gerar PDF semanal do atleta %s", athlete_id)
+        raise HTTPException(500, f"Erro a gerar PDF: {type(e).__name__}: {e}")
+    fname = f"semanal_{_ascii_slug(data['athlete']['name'])}.pdf"
     return StreamingResponse(
         iter([pdf_bytes]),
         media_type="application/pdf",
@@ -4219,23 +4222,26 @@ async def export_monthly_pdf(athlete_id: str, months: int = 6, user=Depends(get_
         rows.append([
             m.get("month", ""),
             str(m.get("sessions", 0)),
-            f'{m.get("avg_load", 0):.0f}',
-            f'{m.get("avg_sleep", 0):.1f}' if m.get("avg_sleep") else "—",
+            f'{(m.get("avg_load") or 0):.0f}',
+            f'{m["avg_sleep"]:.1f}' if m.get("avg_sleep") else "—",
             delta_str,
         ])
     team = await _get_team_or_404(user)
-    pdf_bytes = _build_summary_pdf(
-        title="Resumo Mensal",
-        athlete_name=data["athlete"]["name"],
-        team_name=team["name"],
-        period_label=f"Últimos {months} meses",
-        rows=rows,
-        headers=["Mês", "Sessões", "Carga méd.", "Sono", "Δ vs mês anterior"],
-        evolution=data.get("evolution", "indeterminado"),
-        evolution_pct=data.get("evolution_pct", 0),
-    )
-    safe_name = "".join(c if c.isalnum() else "_" for c in data["athlete"]["name"])[:40]
-    fname = f"mensal_{safe_name}.pdf"
+    try:
+        pdf_bytes = _build_summary_pdf(
+            title="Resumo Mensal",
+            athlete_name=data["athlete"]["name"],
+            team_name=team["name"],
+            period_label=f"Últimos {months} meses",
+            rows=rows,
+            headers=["Mês", "Sessões", "Carga méd.", "Sono", "Δ vs mês anterior"],
+            evolution=data.get("evolution", "indeterminado"),
+            evolution_pct=data.get("evolution_pct") or 0,
+        )
+    except Exception as e:
+        logging.exception("Falha a gerar PDF mensal do atleta %s", athlete_id)
+        raise HTTPException(500, f"Erro a gerar PDF: {type(e).__name__}: {e}")
+    fname = f"mensal_{_ascii_slug(data['athlete']['name'])}.pdf"
     return StreamingResponse(
         iter([pdf_bytes]),
         media_type="application/pdf",
