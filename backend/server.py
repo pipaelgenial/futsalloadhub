@@ -3368,6 +3368,25 @@ async def import_team_backup(
 
 
 # ---------------------- Full Athlete PDF Report (dark theme) ----------------------
+def _pdf_safe(text) -> str:
+    """Escape text for reportlab Paragraphs. Prevents &, <, > from breaking
+    the mini-XML parser and silently dropping content."""
+    import html as _html
+    return _html.escape(str(text or ""), quote=False)
+
+
+def _ascii_slug(text: str, max_len: int = 40) -> str:
+    """Make an ASCII-only slug from any UTF-8 string.
+    RFC 7230 requires HTTP header values to be ASCII, and Cloudflare + some
+    browsers reject non-ASCII in Content-Disposition, surfacing as a
+    generic NETWORK ERROR on the client. So we transliterate first.
+    """
+    import unicodedata
+    t = unicodedata.normalize("NFKD", str(text or ""))
+    t = "".join(c for c in t if not unicodedata.combining(c))
+    return "".join(c if (c.isascii() and (c.isalnum() or c in "-_.")) else "_" for c in t)[:max_len] or "atleta"
+
+
 def _build_athlete_full_pdf(*, athlete: dict, team: dict, metrics: dict, series: list,
                             sessions: list, injuries: list) -> bytes:
     """Generate a dark-themed, shareable PDF with the athlete's complete record.
@@ -3462,12 +3481,12 @@ def _build_athlete_full_pdf(*, athlete: dict, team: dict, metrics: dict, series:
     initials_or_photo = photo_flow
 
     # Name block
-    jersey_html = f'<font color="#CCFF00">#{athlete.get("jersey_number")}</font> · ' if athlete.get("jersey_number") else ""
+    jersey_html = f'<font color="#CCFF00">#{_pdf_safe(athlete.get("jersey_number"))}</font> · ' if athlete.get("jersey_number") else ""
     header_lines = [
         Paragraph("FUTSAL LOAD HUB · REGISTO COMPLETO", p_kicker),
-        Paragraph((athlete.get("name") or "—").upper(), p_title),
+        Paragraph(_pdf_safe((athlete.get("name") or "—").upper()), p_title),
         Paragraph(
-            f'{jersey_html}{athlete.get("position") or "Sem posição"} · {team.get("name","")} · {team.get("escalao","")} · Época {team.get("epoca","")}',
+            f'{jersey_html}{_pdf_safe(athlete.get("position") or "Sem posição")} · {_pdf_safe(team.get("name",""))} · {_pdf_safe(team.get("escalao",""))} · Época {_pdf_safe(team.get("epoca",""))}',
             p_meta,
         ),
     ]
@@ -3475,7 +3494,7 @@ def _build_athlete_full_pdf(*, athlete: dict, team: dict, metrics: dict, series:
     risk_zone = metrics.get("risk", "insufficient_data")
     risk_col = risk_color_map.get(risk_zone, DIM)
     risk_lbl = risk_label_map.get(risk_zone, "—")
-    risk_box_data = [[Paragraph(f'<font color="#0A0A0A"><b>{risk_lbl}</b></font>', ParagraphStyle("rb", fontSize=9, alignment=1))]]
+    risk_box_data = [[Paragraph(f'<font color="#0A0A0A"><b>{_pdf_safe(risk_lbl)}</b></font>', ParagraphStyle("rb", fontSize=9, alignment=1))]]
     risk_box = Table(risk_box_data, colWidths=[3.6 * cm], rowHeights=[0.8 * cm])
     risk_box.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), risk_col),
@@ -3509,12 +3528,12 @@ def _build_athlete_full_pdf(*, athlete: dict, team: dict, metrics: dict, series:
             age = int((date.today() - bd).days / 365.25)
             details.append(f'<b>Data de nascimento:</b> {bd.strftime("%d/%m/%Y")} · <b>Idade:</b> {age}')
         except Exception:
-            details.append(f'<b>Data de nascimento:</b> {athlete["birth_date"]}')
+            details.append(f'<b>Data de nascimento:</b> {_pdf_safe(athlete["birth_date"])}')
     details.append(f'<b>Total de sessões registadas:</b> {len(sessions)}')
     if metrics.get("acwr_method"):
-        details.append(f'<b>Método ACWR:</b> {metrics["acwr_method"].upper()}')
+        details.append(f'<b>Método ACWR:</b> {_pdf_safe(metrics["acwr_method"]).upper()}')
     if athlete.get("is_injured"):
-        details.append(f'<font color="#FF3B30"><b>Lesionado atualmente</b></font>')
+        details.append('<font color="#FF3B30"><b>Lesionado atualmente</b></font>')
     story.append(Paragraph(" · ".join(details), p_body))
 
     # ---------- Metrics grid ----------
@@ -3524,10 +3543,10 @@ def _build_athlete_full_pdf(*, athlete: dict, team: dict, metrics: dict, series:
         col = zone_color(zone) if zone else (LIME if accent else WHITE)
         val_style = ParagraphStyle("mv", fontName="Helvetica-Bold", fontSize=18, textColor=col, leading=20)
         lbl_style = ParagraphStyle("ml", fontName="Helvetica-Bold", fontSize=7, textColor=MUTED, leading=9, spaceAfter=2)
-        unit_txt = f' <font size=8 color="#525252">{unit}</font>' if unit else ""
+        unit_txt = f' <font size=8 color="#525252">{_pdf_safe(unit)}</font>' if unit else ""
         return [
-            Paragraph(label.upper(), lbl_style),
-            Paragraph(f'{value}{unit_txt}', val_style),
+            Paragraph(_pdf_safe(label).upper(), lbl_style),
+            Paragraph(f'{_pdf_safe(value)}{unit_txt}', val_style),
         ]
 
     m = metrics
@@ -3558,7 +3577,7 @@ def _build_athlete_full_pdf(*, athlete: dict, team: dict, metrics: dict, series:
     if metrics.get("risk_description"):
         story.append(Spacer(1, 4))
         story.append(Paragraph(
-            f'<font color="#FFEA00">▸ {metrics["risk_description"]}</font>',
+            f'<font color="#FFEA00">▸ {_pdf_safe(metrics["risk_description"])}</font>',
             ParagraphStyle("rd", fontName="Helvetica", fontSize=8, textColor=YELLOW, leading=11),
         ))
 
@@ -3785,12 +3804,19 @@ async def export_athlete_full_pdf(athlete_id: str, user=Depends(get_current_user
         {"team_id": team["id"], "athlete_id": athlete_id}, {"_id": 0},
     ).sort("start_date", -1).to_list(500)
 
-    pdf_bytes = _build_athlete_full_pdf(
-        athlete=athlete, team=team, metrics=metrics,
-        series=series, sessions=sessions, injuries=injuries,
-    )
-    safe_name = "".join(c if c.isalnum() else "_" for c in (athlete.get("name") or "atleta"))[:40]
-    fname = f"registo_{safe_name}_{date.today().isoformat()}.pdf"
+    try:
+        pdf_bytes = _build_athlete_full_pdf(
+            athlete=athlete, team=team, metrics=metrics,
+            series=series, sessions=sessions, injuries=injuries,
+        )
+    except Exception as e:
+        logging.exception("Falha a gerar PDF completo do atleta %s", athlete_id)
+        raise HTTPException(500, f"Erro a gerar PDF: {type(e).__name__}: {e}")
+
+    # RFC 7230: header values must be ASCII. Non-ASCII in Content-Disposition
+    # confuses Cloudflare + some browsers → generic NETWORK ERROR on the client.
+    ascii_name = _ascii_slug(athlete.get("name") or "atleta")
+    fname = f"registo_{ascii_name}_{date.today().isoformat()}.pdf"
     return StreamingResponse(
         iter([pdf_bytes]),
         media_type="application/pdf",
