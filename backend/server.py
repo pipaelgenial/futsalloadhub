@@ -2201,11 +2201,15 @@ async def calendar_view(start: str, days: int = 28, athlete_id: Optional[str] = 
         d = (start_d + timedelta(days=i)).isoformat()
         rec = by_day_rec.get(d, [])
         plan = by_day_plan.get(d, [])
-        total_load = sum(s["load"] for s in rec)
+        total_load = 0.0
+        total_load_base = 0.0
         athletes_trained = []
         for s in rec:
             a = a_map.get(s["athlete_id"], {})
             mult = _multiplier(s.get("session_type", "training"), mults)
+            adj = float(s.get("load", 0)) * mult
+            total_load += adj
+            total_load_base += float(s.get("load", 0))
             athletes_trained.append({
                 "athlete_id": s["athlete_id"],
                 "name": a.get("name", "—"),
@@ -2214,7 +2218,7 @@ async def calendar_view(start: str, days: int = 28, athlete_id: Optional[str] = 
                 "duration_min": s["duration_min"],
                 "load": s["load"],
                 "session_multiplier": mult,
-                "load_adjusted": round(float(s.get("load", 0)) * mult, 1),
+                "load_adjusted": round(adj, 1),
                 "session_type": s.get("session_type", "training"),
                 "session_id": s["id"],
                 "notes": s.get("notes"),
@@ -2228,6 +2232,7 @@ async def calendar_view(start: str, days: int = 28, athlete_id: Optional[str] = 
             "date": d,
             "weekday": (start_d + timedelta(days=i)).weekday(),
             "total_load": round(total_load, 1),
+            "total_load_base": round(total_load_base, 1),
             "athletes_count": len(rec),
             "athletes": athletes_trained,
             "session_types": dict(type_counts),
