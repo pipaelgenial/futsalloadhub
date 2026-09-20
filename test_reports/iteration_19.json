@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 19 backend-only tests: verified calendar total_load now uses ADJUSTED load (base * session_multiplier), new total_load_base field exposed, team multipliers flow into calendar, and POST /api/teams now enforces the same session_multipliers validation as PUT (400 on invalid). 11/13 tests pass. The 2 failing tests are a pre-existing regression in team/athlete full-report PDFs (broken image data in reportlab) that also failed in iteration 18 — NOT caused by this iteration's changes.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "GET /api/export/team/full-report.pdf", "issue": "Returns 500 - reportlab OSError: 'broken data stream when reading image file' when rendering team logo in _build_team_cover_pdf (server.py:4125). The Image() try/except only catches construction; the failure happens later at drawImage->PIL Image.load(). Pre-existing (also failing in iter18). Suggested fix: eagerly PIL.Image.open(bytes).load()/verify() and fall back to placeholder Drawing if invalid.", "priority": "HIGH"},
+      {"endpoint": "GET /api/export/athlete/{id}/full-report.pdf", "issue": "Returns 500 - same reportlab broken image data stream via team cover path. Pre-existing regression.", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_iteration19.py", "/app/test_reports/pytest/iter19.xml"],
+  "action_items": [
+    "Fix broken team logo handling in _build_team_cover_pdf (~server.py:4123-4128): validate the base64-decoded image bytes with PIL (Image.open(...).verify() or .load()) inside the try block so corrupt logos fall back to the placeholder Drawing instead of failing later during drawImage(). This affects BOTH /api/export/team/full-report.pdf and /api/export/athlete/{id}/full-report.pdf."
+  ],
+  "critical_code_review_comments": [
+    "The lazy-load nature of reportlab.platypus.Image means a corrupt image only errors at draw time, bypassing the try/except at construction. Always pre-validate image bytes.",
+    "Weekly/monthly athlete PDF exports work fine (200 + %PDF header) — issue is specific to the team cover path."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration19.py"],
+  "success_rate": {"backend": "85% (11/13, 2 failures are pre-existing PDF regression)"},
+  "test_credentials": "treinador@futsal.pt / treinador123",
+  "seed_data_creation": "Created & cleaned up TEST_iter19_valid and TEST_iter19_no_mult teams during POST parity tests. Reset team session_multipliers back to defaults {training:1.0,match:1.2,gym:1.0,recovery:0.7}.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 19 change (calendar adjusted total_load + POST parity for multipliers) is verified working. The team/athlete full-report PDF 500 is a pre-existing bug from at least iter18 — a corrupt team logo blob in Mongo causes reportlab drawImage to raise. Weekly/monthly athlete PDFs are unaffected.",
+  "rca of the issue": "server.py:4125 constructs reportlab Image() from base64 logo bytes wrapped in try/except, but reportlab defers actual image decoding until draw time, so a corrupt/invalid logo escapes the try block and crashes deep inside PIL Image.load() with 'broken data stream when reading image file'. Reproduce: GET /api/export/team/full-report.pdf as coach treinador@futsal.pt -> 500. Mitigation: replace `logo = Image(BytesIO(bytes), ...)` with an eager PIL validation, e.g. `im = PIL.Image.open(BytesIO(bytes)); im.load()` (or `.verify()`), then re-open into reportlab Image; on any exception fall back to the placeholder Drawing already coded on line 4130."
+}

@@ -3605,6 +3605,8 @@ def _build_athlete_full_pdf(*, athlete: dict, team: dict, metrics: dict, series:
     if b64:
         try:
             img_bytes = _b64.b64decode(b64)
+            import PIL.Image as _PILImage
+            _PILImage.open(io.BytesIO(img_bytes)).load()
             photo_flow = Image(io.BytesIO(img_bytes), width=3.2 * cm, height=3.2 * cm)
         except Exception:
             photo_flow = None
@@ -3916,7 +3918,10 @@ def _append_signature_block(story, *, team, user=None, Image, Paragraph, Table,
     b64 = team.get("signature_data_b64")
     if b64:
         try:
-            sig_flow = Image(io.BytesIO(_b64.b64decode(b64)), width=4.5 * cm, height=1.8 * cm, kind="proportional")
+            raw = _b64.b64decode(b64)
+            import PIL.Image as _PILImage
+            _PILImage.open(io.BytesIO(raw)).load()
+            sig_flow = Image(io.BytesIO(raw), width=4.5 * cm, height=1.8 * cm, kind="proportional")
         except Exception:
             sig_flow = None
 
@@ -4118,12 +4123,15 @@ def _build_team_cover_pdf(*, team: dict, athletes: list) -> bytes:
     p_section = ParagraphStyle("sec", fontName="Helvetica-Bold", fontSize=13, leading=16, textColor=WHITE, spaceBefore=18, spaceAfter=8)
 
     story = []
-    # Logo
+    # Logo — pre-validate with PIL because reportlab defers decoding to draw
+    # time (a corrupt image would bypass the try/except and crash later).
     logo = None
     if team.get("logo_data_b64"):
         try:
-            logo = Image(io.BytesIO(_b64.b64decode(team["logo_data_b64"])),
-                         width=4 * cm, height=4 * cm, kind="proportional")
+            raw = _b64.b64decode(team["logo_data_b64"])
+            import PIL.Image as _PILImage
+            _PILImage.open(io.BytesIO(raw)).load()  # eager decode → raise now if broken
+            logo = Image(io.BytesIO(raw), width=4 * cm, height=4 * cm, kind="proportional")
         except Exception:
             logo = None
     if logo is None:
