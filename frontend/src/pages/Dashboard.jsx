@@ -438,7 +438,7 @@ export default function Dashboard() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
                           <div className="font-semibold text-sm">{a.name}</div>
-                          <RiskBadge risk={a.metrics.risk} />
+                          <RiskBadge risk={a.metrics.risk} warningKind={a.metrics.warning_kind} />
                         </div>
                         <div className="text-xs text-[#A3A3A3] mb-1">
                           ACWR <span className="metric-num text-white">{a.metrics.acwr}</span>
@@ -546,7 +546,7 @@ export default function Dashboard() {
                         <td className="py-3 px-2 metric-num font-bold" style={{ color: monoColor }} data-testid={`row-monotony-${a.id}`}>{m.monotony || "—"}</td>
                         <td className="py-3 px-2 metric-num font-bold" style={{ color: strainColor }} data-testid={`row-strain-${a.id}`}>{m.strain || "—"}</td>
                         <td className="py-3 px-2">{m.total_sessions}</td>
-                        <td className="py-3 px-2"><RiskBadge risk={m.risk} /></td>
+                        <td className="py-3 px-2"><RiskBadge risk={m.risk} warningKind={m.warning_kind} /></td>
                       </tr>
                     );
                   })}

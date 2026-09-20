@@ -1,9 +1,21 @@
-export function riskMeta(risk) {
+// Warning-kind color mapping so the "Atenção" tag differentiates the reason.
+export const WARNING_KIND_META = {
+  detraining:  { label: "Sub-treino",   color: "#00B0FF", bg: "rgba(0,176,255,0.12)",  border: "rgba(0,176,255,0.35)" },
+  acwr_alert:  { label: "Carga Alta",   color: "#FF9500", bg: "rgba(255,149,0,0.12)",  border: "rgba(255,149,0,0.35)" },
+  monotony:    { label: "Monotonia",    color: "#A855F7", bg: "rgba(168,85,247,0.14)", border: "rgba(168,85,247,0.35)" },
+  strain:      { label: "Strain Alto",  color: "#FF7043", bg: "rgba(255,112,67,0.14)", border: "rgba(255,112,67,0.35)" },
+  wellness:    { label: "Bem-Estar",    color: "#FFEA00", bg: "rgba(255,234,0,0.10)",  border: "rgba(255,234,0,0.35)" },
+};
+
+export function riskMeta(risk, warningKind) {
   switch (risk) {
     case "safe":
       return { label: "Ótimo", color: "#00E676", bg: "rgba(0,230,118,0.1)", border: "rgba(0,230,118,0.3)" };
-    case "warning":
+    case "warning": {
+      const specific = warningKind && WARNING_KIND_META[warningKind];
+      if (specific) return specific;
       return { label: "Atenção", color: "#FFEA00", bg: "rgba(255,234,0,0.1)", border: "rgba(255,234,0,0.3)" };
+    }
     case "danger":
       return { label: "Risco Elevado", color: "#FF3B30", bg: "rgba(255,59,48,0.1)", border: "rgba(255,59,48,0.3)" };
     case "insufficient":
@@ -38,8 +50,8 @@ export function zoneColor(zone) {
   return map[zone] || "#A3A3A3";
 }
 
-export function RiskBadge({ risk, testid }) {
-  const m = riskMeta(risk);
+export function RiskBadge({ risk, warningKind, testid }) {
+  const m = riskMeta(risk, warningKind);
   return (
     <span
       data-testid={testid}

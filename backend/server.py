@@ -149,6 +149,7 @@ class TeamIn(BaseModel):
     load_thresholds: Optional[dict] = None  # {ideal, moderate, high, very_high} per-athlete UA
     acwr_method: Optional[str] = None  # "ra" (rolling avg 1:4) or "ewma"
     coach_name: Optional[str] = None  # displayed on the signature block of exports
+    session_multipliers: Optional[dict] = None  # {training, match, gym, recovery} used by EWMA / adjusted load
 
 
 DEFAULT_LOAD_THRESHOLDS = {"ideal": 300, "moderate": 600, "high": 900, "very_high": 1200}
@@ -212,18 +213,56 @@ SESSION_MULTIPLIERS = {
     "injury": 0.0,
 }
 
-
-def _multiplier(session_type: str) -> float:
-    return SESSION_MULTIPLIERS.get(session_type or "training", 1.0)
-
-
-def _load_adjusted(s: dict) -> float:
-    return float(s.get("load", 0)) * _multiplier(s.get("session_type", "training"))
+# Session types the coach is allowed to reconfigure (rest/injury stay at 0).
+CONFIGURABLE_MULT_KEYS = ("training", "match", "gym", "recovery")
 
 
-def _enrich_session(s: dict) -> dict:
+def _effective_multipliers(team: Optional[dict]) -> dict:
+    """Return the multipliers dict for a team, merging saved overrides on top of
+    defaults. Keeps rest/injury pinned at 0."""
+    merged = dict(SESSION_MULTIPLIERS)
+    if team and isinstance(team.get("session_multipliers"), dict):
+        for k, v in team["session_multipliers"].items():
+            if k in CONFIGURABLE_MULT_KEYS:
+                try:
+                    fv = float(v)
+                    if 0 < fv <= 3.0:
+                        merged[k] = round(fv, 2)
+                except (TypeError, ValueError):
+                    continue
+    return merged
+
+
+def _sanitize_multipliers(raw) -> Optional[dict]:
+    """Validate a session_multipliers dict from the API. Returns dict of the
+    4 configurable keys with clamped values (0.1..3.0). None on invalid input."""
+    if not isinstance(raw, dict):
+        return None
+    out = {}
+    for k in CONFIGURABLE_MULT_KEYS:
+        if k in raw:
+            try:
+                v = float(raw[k])
+            except (TypeError, ValueError):
+                return None
+            if not (0 < v <= 3.0):
+                return None
+            out[k] = round(v, 2)
+    return out or None
+
+
+def _multiplier(session_type: str, multipliers: Optional[dict] = None) -> float:
+    src = multipliers if multipliers is not None else SESSION_MULTIPLIERS
+    return src.get(session_type or "training", 1.0)
+
+
+def _load_adjusted(s: dict, multipliers: Optional[dict] = None) -> float:
+    return float(s.get("load", 0)) * _multiplier(s.get("session_type", "training"), multipliers)
+
+
+def _enrich_session(s: dict, multipliers: Optional[dict] = None) -> dict:
     """Attach session_multiplier and load_adjusted to a session dict (in-place & return)."""
-    mult = _multiplier(s.get("session_type", "training"))
+    mult = _multiplier(s.get("session_type", "training"), multipliers)
     s["session_multiplier"] = mult
     s["load_adjusted"] = round(float(s.get("load", 0)) * mult, 1)
     return s
@@ -571,6 +610,7 @@ async def create_team(data: TeamIn, user=Depends(get_current_user)):
         "coach_name": (data.coach_name or "").strip() or None,
         "load_thresholds": thresholds,
         "acwr_method": data.acwr_method if data.acwr_method in VALID_ACWR_METHODS else DEFAULT_ACWR_METHOD,
+        "session_multipliers": _sanitize_multipliers(data.session_multipliers) if data.session_multipliers else None,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.teams.insert_one(doc)
@@ -597,6 +637,13 @@ async def update_team_by_id(team_id: str, data: TeamIn, user=Depends(get_current
         if data.acwr_method not in VALID_ACWR_METHODS:
             raise HTTPException(400, "Método ACWR inválido (use 'ra' ou 'ewma')")
         update_fields["acwr_method"] = data.acwr_method
+    if data.session_multipliers is not None:
+        m = _sanitize_multipliers(data.session_multipliers)
+        if m is None:
+            raise HTTPException(400, "Multiplicadores inválidos — usar valores entre 0.1 e 3.0")
+        # Merge with existing so partial updates keep untouched keys
+        current = existing.get("session_multipliers") or {}
+        update_fields["session_multipliers"] = {**current, **m}
     await db.teams.update_one({"id": team_id}, {"$set": update_fields})
     refreshed = await db.teams.find_one({"id": team_id}, {"_id": 0})
     if refreshed and not refreshed.get("load_thresholds"):
@@ -1215,10 +1262,13 @@ def _ewma_acwr(by_day: dict, ref_date: date) -> tuple:
 
 
 def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None,
-                                method: str = DEFAULT_ACWR_METHOD) -> dict:
+                                method: str = DEFAULT_ACWR_METHOD,
+                                multipliers: Optional[dict] = None) -> dict:
     """Compute ACWR, acute, chronic, monotony, strain, risk for one athlete.
 
     method: 'ra' (rolling average 1:4) or 'ewma' (exponentially weighted).
+    multipliers: optional per-team session-type multipliers dict; falls back to
+    SESSION_MULTIPLIERS.
     """
     if ref_date is None:
         ref_date = date.today()
@@ -1231,7 +1281,7 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None,
     for s in sessions:
         d = _parse_date(s["date"])
         by_day[d] += s["load"]
-        by_day_adj[d] += _load_adjusted(s)
+        by_day_adj[d] += _load_adjusted(s, multipliers)
         sleep_by_day[d] = s["sleep_quality"]
         dates_set.append(d)
 
@@ -1411,6 +1461,22 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None,
     else:
         risk_description = " · ".join(risk_reasons)
 
+    # Determine the *primary* warning kind so the UI can colour the badge
+    # differently (undertraining ≠ high load ≠ monotony ≠ strain ≠ wellness).
+    # Priority: acwr issues > strain > monotony > wellness (highest impact first).
+    warning_kind = None
+    if risk == "warning":
+        if acwr_zone == "detraining":
+            warning_kind = "detraining"
+        elif acwr_zone == "alert":
+            warning_kind = "acwr_alert"
+        elif strain_zone == "elevated":
+            warning_kind = "strain"
+        elif mono_zone == "moderate_high":
+            warning_kind = "monotony"
+        elif wellness_zone in ("fatigued", "moderate"):
+            warning_kind = "wellness"
+
     # Averages — rest days DILUTE avg_load (count in denominator, contributing 0).
     # Rest days count as 0-UA days in the 7/28-day ACWR window (standard convention).
     # Sleep/wellness exclude None values (rest days have no value to average).
@@ -1437,6 +1503,7 @@ def compute_metrics_for_athlete(sessions: list, ref_date: Optional[date] = None,
         "risk_label": risk_label_map.get(risk, ""),
         "risk_description": risk_description,
         "risk_reasons": risk_reasons,
+        "warning_kind": warning_kind,
         "days_since_first": days_since_first,
         "sufficient_data": sufficient,
         "total_sessions": len(sessions),
@@ -1455,7 +1522,8 @@ async def analytics_athlete(athlete_id: str, user=Depends(get_current_user)):
         raise HTTPException(404, "Atleta não encontrado")
     sessions = await db.sessions.find({"athlete_id": athlete_id}, {"_id": 0}).to_list(5000)
     method = team.get("acwr_method") or DEFAULT_ACWR_METHOD
-    metrics = compute_metrics_for_athlete(sessions, method=method)
+    mults = _effective_multipliers(team)
+    metrics = compute_metrics_for_athlete(sessions, method=method, multipliers=mults)
     metrics["acwr_method"] = method
 
     # daily time series for ACWR chart (last 60 days)
@@ -1465,7 +1533,7 @@ async def analytics_athlete(athlete_id: str, user=Depends(get_current_user)):
     for s in sessions:
         d = _parse_date(s["date"])
         by_day[d] += s["load"]
-        by_day_adj[d] += _load_adjusted(s)
+        by_day_adj[d] += _load_adjusted(s, mults)
 
     series = []
     for i in range(59, -1, -1):
@@ -1490,7 +1558,7 @@ async def analytics_athlete(athlete_id: str, user=Depends(get_current_user)):
             "acwr": acwr,
         })
 
-    return {"athlete": athlete, "metrics": metrics, "series": series, "sessions": [_enrich_session(s) for s in sessions], "acwr_method": method}
+    return {"athlete": athlete, "metrics": metrics, "series": series, "sessions": [_enrich_session(s, mults) for s in sessions], "acwr_method": method}
 
 
 @api.get("/analytics/team")
@@ -1512,9 +1580,10 @@ async def analytics_team(user=Depends(get_current_user)):
     counted = 0
     risk_counts = {"safe": 0, "warning": 0, "danger": 0, "insufficient": 0, "low": 0, "no_data": 0}
     method = team.get("acwr_method") or DEFAULT_ACWR_METHOD
+    mults = _effective_multipliers(team)
     for a in athletes:
         sessions = await db.sessions.find({"athlete_id": a["id"]}, {"_id": 0}).to_list(5000)
-        m = compute_metrics_for_athlete(sessions, method=method)
+        m = compute_metrics_for_athlete(sessions, method=method, multipliers=mults)
         out_athletes.append({**a, "metrics": m})
         risk_counts[m["risk"]] = risk_counts.get(m["risk"], 0) + 1
         if m["sufficient_data"]:
@@ -1738,13 +1807,14 @@ async def monthly_summary(athlete_id: str, months: int = 6, user=Depends(get_cur
 async def compare_athletes(a1: str, a2: str, user=Depends(get_current_user)):
     team = await _get_team_or_404(user)
     method = team.get("acwr_method") or DEFAULT_ACWR_METHOD
+    mults = _effective_multipliers(team)
     out = []
     for aid in (a1, a2):
         athlete = await db.athletes.find_one({"id": aid, "team_id": team["id"]}, {"_id": 0})
         if not athlete:
             raise HTTPException(404, f"Atleta {aid} não encontrado")
         sessions = await db.sessions.find({"athlete_id": aid}, {"_id": 0}).to_list(5000)
-        metrics = compute_metrics_for_athlete(sessions, method=method)
+        metrics = compute_metrics_for_athlete(sessions, method=method, multipliers=mults)
 
         ref = date.today()
         by_day = defaultdict(float)
@@ -1752,7 +1822,7 @@ async def compare_athletes(a1: str, a2: str, user=Depends(get_current_user)):
         for s in sessions:
             d = _parse_date(s["date"])
             by_day[d] += s["load"]
-            by_day_adj[d] += _load_adjusted(s)
+            by_day_adj[d] += _load_adjusted(s, mults)
 
         series = []
         for i in range(59, -1, -1):
@@ -1925,10 +1995,11 @@ async def get_alerts(user=Depends(get_current_user)):
     alerts: list[dict] = []
     now_iso = datetime.now(timezone.utc).isoformat()
     method = team.get("acwr_method") or DEFAULT_ACWR_METHOD
+    mults = _effective_multipliers(team)
 
     for a in athletes:
         sessions = await db.sessions.find({"athlete_id": a["id"]}, {"_id": 0}).to_list(5000)
-        m = compute_metrics_for_athlete(sessions, method=method)
+        m = compute_metrics_for_athlete(sessions, method=method, multipliers=mults)
         last = max(sessions, key=lambda s: s["date"]) if sessions else None
         ath_name = a["name"]
 
@@ -2116,6 +2187,7 @@ async def calendar_view(start: str, days: int = 28, athlete_id: Optional[str] = 
     planned = await db.planned_sessions.find(p_filter, {"_id": 0}).to_list(1000)
     athletes = await db.athletes.find({"team_id": team["id"]}, {"_id": 0}).to_list(500)
     a_map = {a["id"]: a for a in athletes}
+    mults = _effective_multipliers(team)
 
     by_day_rec = defaultdict(list)
     for s in sessions:
@@ -2133,7 +2205,7 @@ async def calendar_view(start: str, days: int = 28, athlete_id: Optional[str] = 
         athletes_trained = []
         for s in rec:
             a = a_map.get(s["athlete_id"], {})
-            mult = _multiplier(s.get("session_type", "training"))
+            mult = _multiplier(s.get("session_type", "training"), mults)
             athletes_trained.append({
                 "athlete_id": s["athlete_id"],
                 "name": a.get("name", "—"),
@@ -2283,12 +2355,13 @@ async def team_detailed(
     ).to_list(20000)
 
     n_athletes = len(active_athletes)
+    mults = _effective_multipliers(team)
     by_day = defaultdict(float)
     by_day_adj = defaultdict(float)
     for s in sessions:
         d = _parse_date(s["date"])
         by_day[d] += s["load"]
-        by_day_adj[d] += _load_adjusted(s)
+        by_day_adj[d] += _load_adjusted(s, mults)
     # average per athlete (treat team as a "super athlete" with avg load)
     by_day_avg = {d: v / n_athletes for d, v in by_day.items()}
     by_day_adj_avg = {d: v / n_athletes for d, v in by_day_adj.items()}
@@ -3881,7 +3954,8 @@ async def _prepare_athlete_pdf_data(athlete: dict, team: dict):
     by the single-athlete PDF endpoint and the team roll-up PDF."""
     sessions = await db.sessions.find({"athlete_id": athlete["id"]}, {"_id": 0}).sort("date", 1).to_list(20000)
     method = team.get("acwr_method") or DEFAULT_ACWR_METHOD
-    metrics = compute_metrics_for_athlete(sessions, method=method)
+    mults = _effective_multipliers(team)
+    metrics = compute_metrics_for_athlete(sessions, method=method, multipliers=mults)
     metrics["acwr_method"] = method
 
     ref = date.today()
@@ -3890,7 +3964,7 @@ async def _prepare_athlete_pdf_data(athlete: dict, team: dict):
     for s in sessions:
         d = _parse_date(s["date"])
         by_day[d] += s["load"]
-        by_day_adj[d] += _load_adjusted(s)
+        by_day_adj[d] += _load_adjusted(s, mults)
     series = []
     for i in range(59, -1, -1):
         d = ref - timedelta(days=i)

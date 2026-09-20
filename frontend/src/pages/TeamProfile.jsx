@@ -17,11 +17,13 @@ const ESCALAO_PRESETS = {
   "Sénior": { ideal: 400, moderate: 800, high: 1200, very_high: 1600 },
 };
 
+const DEFAULT_MULTIPLIERS = { training: 1.0, match: 1.2, gym: 1.0, recovery: 0.7 };
+
 export default function TeamProfile() {
   const [teams, setTeams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null); // id or "new"
-  const [form, setForm] = useState({ name: "", escalao: "", epoca: "", coach_name: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra" });
+  const [form, setForm] = useState({ name: "", escalao: "", epoca: "", coach_name: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra", session_multipliers: { ...DEFAULT_MULTIPLIERS } });
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const fileRef = useRef(null);
@@ -103,7 +105,7 @@ export default function TeamProfile() {
       return;
     }
     setEditing("new");
-    setForm({ name: "", escalao: "", epoca: "", coach_name: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra" });
+    setForm({ name: "", escalao: "", epoca: "", coach_name: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra", session_multipliers: { ...DEFAULT_MULTIPLIERS } });
   }
 
   function startEdit(t) {
@@ -115,12 +117,13 @@ export default function TeamProfile() {
       coach_name: t.coach_name || "",
       load_thresholds: t.load_thresholds || { ...DEFAULT_THRESHOLDS },
       acwr_method: t.acwr_method || "ra",
+      session_multipliers: { ...DEFAULT_MULTIPLIERS, ...(t.session_multipliers || {}) },
     });
   }
 
   function cancel() {
     setEditing(null);
-    setForm({ name: "", escalao: "", epoca: "", coach_name: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra" });
+    setForm({ name: "", escalao: "", epoca: "", coach_name: "", load_thresholds: { ...DEFAULT_THRESHOLDS }, acwr_method: "ra", session_multipliers: { ...DEFAULT_MULTIPLIERS } });
   }
 
   function setThreshold(key, value) {
@@ -158,6 +161,12 @@ export default function TeamProfile() {
         epoca: form.epoca,
         coach_name: form.coach_name || null,
         acwr_method: form.acwr_method || "ra",
+        session_multipliers: {
+          training: Number(form.session_multipliers.training) || 1.0,
+          match: Number(form.session_multipliers.match) || 1.2,
+          gym: Number(form.session_multipliers.gym) || 1.0,
+          recovery: Number(form.session_multipliers.recovery) || 0.7,
+        },
         load_thresholds: {
           ideal: Number(form.load_thresholds.ideal),
           moderate: Number(form.load_thresholds.moderate),
@@ -315,6 +324,52 @@ export default function TeamProfile() {
                 <div className="text-[10px] mt-1 opacity-70">λ=0.25 / λ=0.069 · pesos exp. decrescentes</div>
               </button>
             </div>
+          </div>
+
+          {/* Session-type multipliers (applied in EWMA & adjusted load) */}
+          <div className="border-t border-white/5 pt-5" data-testid="session-multipliers-block">
+            <div className="font-head text-sm uppercase tracking-widest mb-1">Multiplicadores por Tipo de Sessão</div>
+            <p className="text-[10px] text-[#525252] mb-3">
+              Ajusta o peso relativo de cada sessão na "carga ajustada" (usada no EWMA).
+              Valor entre 0.1 e 3.0. Ex.: jogo &gt; treino &gt; ginásio &gt; recuperação.
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { key: "training", label: "Treino", color: "#CCFF00" },
+                { key: "match", label: "Jogo", color: "#FF3B30" },
+                { key: "gym", label: "Ginásio", color: "#FFEA00" },
+                { key: "recovery", label: "Recuperação", color: "#00B0FF" },
+              ].map((row) => (
+                <div key={row.key}>
+                  <label className="fld-label flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full inline-block" style={{ background: row.color }} />
+                    {row.label}
+                  </label>
+                  <input
+                    className="fld-input"
+                    type="number"
+                    step="0.05"
+                    min="0.1"
+                    max="3"
+                    value={form.session_multipliers[row.key]}
+                    onChange={(e) => setForm((f) => ({
+                      ...f,
+                      session_multipliers: { ...f.session_multipliers, [row.key]: e.target.value },
+                    }))}
+                    data-testid={`mult-${row.key}`}
+                    required
+                  />
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, session_multipliers: { ...DEFAULT_MULTIPLIERS } }))}
+              className="text-[10px] uppercase tracking-widest text-[#A3A3A3] hover:text-[#CCFF00] mt-2"
+              data-testid="mult-reset"
+            >
+              Repor predefinidos (1.0 / 1.2 / 1.0 / 0.7)
+            </button>
           </div>
 
           {/* Limiares de carga por atleta */}

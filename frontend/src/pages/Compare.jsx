@@ -90,7 +90,7 @@ export default function Compare() {
               <div className="text-xs uppercase tracking-widest" style={{ color: A1_COLOR }}>Atleta 1</div>
               <div className="font-head text-3xl font-bold mt-1">{data.a1.athlete.name}</div>
               <div className="text-xs text-[#A3A3A3]">{data.a1.athlete.position}</div>
-              <div className="mt-3"><RiskBadge risk={data.a1.metrics.risk} /></div>
+              <div className="mt-3"><RiskBadge risk={data.a1.metrics.risk} warningKind={data.a1.metrics.warning_kind} /></div>
             </div>
             <div className="text-center">
               <div className="font-head text-7xl text-[#525252] font-black">VS</div>
@@ -99,7 +99,7 @@ export default function Compare() {
               <div className="text-xs uppercase tracking-widest" style={{ color: A2_COLOR }}>Atleta 2</div>
               <div className="font-head text-3xl font-bold mt-1">{data.a2.athlete.name}</div>
               <div className="text-xs text-[#A3A3A3]">{data.a2.athlete.position}</div>
-              <div className="mt-3 flex justify-end"><RiskBadge risk={data.a2.metrics.risk} /></div>
+              <div className="mt-3 flex justify-end"><RiskBadge risk={data.a2.metrics.risk} warningKind={data.a2.metrics.warning_kind} /></div>
             </div>
           </div>
 

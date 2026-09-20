@@ -119,7 +119,7 @@ export default function AthleteDetail() {
               <FileDown className="w-3.5 h-3.5" /> PDF COMPLETO
             </button>
           </div>
-          <RiskBadge risk={metrics.risk} testid="athlete-risk-badge" />
+          <RiskBadge risk={metrics.risk} warningKind={metrics.warning_kind} testid="athlete-risk-badge" />
           {metrics.risk_description && (
             <div className="text-xs text-[#A3A3A3] max-w-md mt-2" data-testid="athlete-risk-description">
               {metrics.risk_description}
