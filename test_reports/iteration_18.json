@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 18 (configurable session_multipliers + differentiated warning_kind badge) verified. Backend: 13/13 pytest passing — POST/PUT /api/teams accept & validate session_multipliers, reject invalid (0, 5, 'foo', -1) with 400; values flow into /api/analytics/athlete session_multiplier and load_adjusted (match=1.5 verified); metrics.warning_kind field present with correct enum values; regression PDFs (athlete full, team full, weekly, monthly) return 200 with %PDF header. Frontend: Team Edit form shows 'Multiplicadores por Tipo de Sessão' block with 4 inputs; editing (match=1.5, training=1.1) persists across reload; 'Repor predefinidos' (mult-reset) restores 1.0/1.2/1.0/0.7; dashboard risk-alert cells display blue 'SUB-TREINO' badges for demo detraining athletes (matches WARNING_KIND_META.detraining #00B0FF).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/teams", "issue": "Unlike PUT, POST silently drops invalid session_multipliers (returns None from _sanitize_multipliers without HTTP 400). Inconsistent with PUT behaviour. Low-severity since UI never posts invalid values and the request just falls back to defaults."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration18.py",
+    "/app/test_reports/pytest/iteration18.xml"
+  ],
+  "action_items": [
+    "Optional: make POST /api/teams reject invalid session_multipliers with 400 for parity with PUT."
+  ],
+  "critical_code_review_comments": [
+    "server.py grew to 4389 lines — consider splitting into routers (teams, analytics, exports, seed) for maintainability.",
+    "_sanitize_multipliers used inconsistently: POST silently discards invalid dict, PUT returns 400. Unify behaviour.",
+    "Frontend Bits.jsx / risk badge mapping is fully data-driven via WARNING_KIND_META — clean & extensible."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration18.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Coach: treinador@futsal.pt / treinador123 (from /app/memory/test_credentials.md context)",
+  "seed_data_creation": "None — used existing demo seed. Restored team session_multipliers back to defaults (1.0/1.2/1.0/0.7) after each mutation test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 18 fully green. Demo seed produces warning_kind='detraining' for most athletes — to exercise other kinds (acwr_alert/monotony/strain/wellness) you'd need to synthesise session data. Backend regression suite for iterations 14-17 still passing via test_iteration18 subset (full PDFs, weekly/monthly PDFs).",
+  "rca of the issue": "N/A — no failing tests."
+}

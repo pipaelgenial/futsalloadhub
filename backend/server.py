@@ -610,7 +610,7 @@ async def create_team(data: TeamIn, user=Depends(get_current_user)):
         "coach_name": (data.coach_name or "").strip() or None,
         "load_thresholds": thresholds,
         "acwr_method": data.acwr_method if data.acwr_method in VALID_ACWR_METHODS else DEFAULT_ACWR_METHOD,
-        "session_multipliers": _sanitize_multipliers(data.session_multipliers) if data.session_multipliers else None,
+        "session_multipliers": (lambda: (_sanitize_multipliers(data.session_multipliers) if _sanitize_multipliers(data.session_multipliers) is not None else (_ for _ in ()).throw(HTTPException(400, "Multiplicadores inválidos — usar valores entre 0.1 e 3.0"))))() if data.session_multipliers else None,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.teams.insert_one(doc)
