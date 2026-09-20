@@ -1,0 +1,23 @@
+{
+  "summary": "Iteration 20 backend re-test after PDF fix: verified that eager PIL.Image.open(...).load() inside try/except in _build_athlete_full_pdf, _append_signature_block, and _build_team_cover_pdf resolves the pre-existing reportlab 500. All 10 tests pass (8/8 athlete full PDFs + 1 team full PDF + corrupt-logo fallback for both endpoints + calendar regression + POST teams parity + weekly/monthly PDFs). The iter19 primary (calendar adjusted total_load + total_load_base) remains green.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration20.py",
+    "/app/test_reports/pytest/iter20.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fix applied is minimal and correct: for each Image() construction from base64 blob, an eager PIL.Image.open(BytesIO(bytes)).load() forces early decode so corrupt bytes raise INSIDE the existing try/except and fall through to the placeholder Drawing.",
+    "The three call sites (athlete photo ~server.py:3603-3617, coach signature ~3917-3926, team logo ~4126-4139) are all patched consistently.",
+    "Suggestion (non-blocking): factor the pattern into a small helper `_safe_reportlab_image(b64, **kwargs)` to avoid drift if a 4th image site is added later."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration20.py"],
+  "success_rate": {"backend": "100% (10/10)"},
+  "test_credentials": "treinador@futsal.pt / treinador123",
+  "seed_data_creation": "Temporarily overwrote active team.logo_data_b64 with garbage base64 in Mongo to prove fallback; original value is restored via addfinalizer at the end of the test class. No residual mutations.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "PDF 500 regression from iter18/19 is now fully fixed. test_iteration20.py contains a Mongo-tampering test that flips logo_data_b64 to garbage and restores it; safe to reuse. If future iterations add more base64-image renders (e.g., background/watermark), copy the eager PIL.Image.open(...).load() pattern into their try/except.",
+  "rca of the issue": "reportlab.platypus.Image constructor stores the BytesIO handle but only actually decodes at draw() time via PIL, so any exception raised during decode bypassed the try/except at construction and crashed doc.build(). Fix: eagerly call PIL.Image.open(BytesIO(bytes)).load() inside the same try so a corrupt blob raises immediately and the code falls through to the placeholder Drawing. Validated by tampering with the team's logo_data_b64 (set to random base64 bytes) — both /api/export/athlete/{id}/full-report.pdf and /api/export/team/full-report.pdf still return 200 + %PDF."
+}

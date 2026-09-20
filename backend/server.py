@@ -4361,8 +4361,8 @@ async def on_startup():
     )
 
     # --- Bootstrap admin account ---
-    ADMIN_BOOTSTRAP_EMAIL = "pedrompsantos84@gmail.com"
-    ADMIN_BOOTSTRAP_PWD = "amarense"
+    ADMIN_BOOTSTRAP_EMAIL = os.environ.get("ADMIN_BOOTSTRAP_EMAIL", "pedrompsantos84@gmail.com")
+    ADMIN_BOOTSTRAP_PWD = os.environ.get("ADMIN_BOOTSTRAP_PASSWORD", "amarense")
     existing_admin = await db.users.find_one({"email": ADMIN_BOOTSTRAP_EMAIL})
     if not existing_admin:
         await db.users.insert_one({
